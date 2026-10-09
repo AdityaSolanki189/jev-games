@@ -31,11 +31,17 @@ export function jumpRiseTimeMs(obstacleTop: number): number {
     return (Math.asin(ratio) / Math.PI) * JUMP_DURATION_MS
 }
 
+/** Feet must rise above this (px from ground) to clear the obstacle hitbox top. */
+export function jumpClearanceHeightPx(obs: ObstacleInstance): number {
+    return obs.yOffset + obs.height - HITBOX_INSET_Y
+}
+
 /** Latest game-time ms (before contact) at which a jump can still clear this obstacle at `speed`. */
 export function latestJumpStartLeadMs(obs: ObstacleInstance, speedPxPerSec: number): number {
-    const rise = jumpRiseTimeMs(obs.height - HITBOX_INSET_Y)
+    const clearance = jumpClearanceHeightPx(obs)
+    const rise = jumpRiseTimeMs(clearance)
     const passageMs = ((RUNNER_W + obs.width - HITBOX_INSET_X * 2) / speedPxPerSec) * 1000
-    const clearWindow = clearDurationAboveMs(obs.height - HITBOX_INSET_Y)
+    const clearWindow = clearDurationAboveMs(clearance)
     const extra = Math.max(0, passageMs - clearWindow) * 0.5
     return rise + 40 + extra
 }

@@ -1,4 +1,11 @@
-import { appendObstacle, generateInitialStream, obstacleHitbox, obstacleLabel } from '@/lib/game/obstacles'
+import {
+    acceptableActions,
+    appendObstacle,
+    generateInitialStream,
+    isAcceptableAction,
+    obstacleHitbox,
+    obstacleLabel,
+} from '@/lib/game/obstacles'
 import { buildLayaRequest, randomDecision, rulesDecision } from '@/lib/game/controllers'
 import { mulberry32, randomSeed } from '@/lib/game/rng'
 import {
@@ -63,6 +70,7 @@ export interface EngineCallbacks {
     }>
     onLog: (entry: DecisionLogEntry) => void
     onStatsTick: (snapshot: Partial<GameSnapshot>) => void
+    onFrame: (snapshot: GameSnapshot) => void
     onPhaseChange: (phase: GamePhase) => void
 }
 
@@ -224,6 +232,7 @@ export class DinoEngine {
         if (this.phase === 'warming_up') return
 
         if (this.phase === 'crashed') {
+            this.callbacks.onFrame(this.getSnapshot())
             return
         }
 
@@ -256,6 +265,8 @@ export class DinoEngine {
         this.updateDuckHold()
         this.checkCollisions()
         this.markCleared()
+
+        this.callbacks.onFrame(this.getSnapshot())
 
         if (this.elapsedMs - this.lastStatsAt > 250) {
             this.lastStatsAt = this.elapsedMs
@@ -388,15 +399,26 @@ export class DinoEngine {
         return next ? obstacleLabel(next.kind) : 'none'
     }
 
+    private maneuverLeadMs(obs: ObstacleInstance, speed: number, action: GameAction): number {
+        if (action === 'JUMP') return latestJumpStartLeadMs(obs, speed)
+        if (action === 'DUCK') return DUCK_START_LEAD_MS + 80
+        return 100
+    }
+
+    /** Strictest response window among acceptable actions (for UI while waiting). */
     private maneuverDeadlineMs(obs: ObstacleInstance, speed: number, distanceToContact: number): number {
         const ttcContact = (distanceToContact / speed) * 1000
-        if (obs.idealAction === 'JUMP') {
-            return Math.max(0, ttcContact - latestJumpStartLeadMs(obs, speed))
+        const actions = acceptableActions(obs.kind)
+        let minDeadline = Number.POSITIVE_INFINITY
+        for (const action of actions) {
+            const deadline = Math.max(0, ttcContact - this.maneuverLeadMs(obs, speed, action))
+            minDeadline = Math.min(minDeadline, deadline)
         }
-        if (obs.idealAction === 'DUCK') {
-            return Math.max(0, ttcContact - DUCK_START_LEAD_MS - 80)
-        }
-        return Math.max(0, ttcContact - 100)
+        return Number.isFinite(minDeadline) ? minDeadline : Math.max(0, ttcContact - 100)
+    }
+
+    private responseDeadlineMs(obs: ObstacleInstance, ttcMs: number, speed: number, choice: GameAction): number {
+        return Math.max(0, ttcMs - this.maneuverLeadMs(obs, speed, choice))
     }
 
     private checkDecisions(speed: number) {
@@ -426,6 +448,7 @@ export class DinoEngine {
                 sentAtMs: this.elapsedMs,
                 deadlineMs,
                 ttcMs,
+                speedPxPerSec: speed,
                 requestPayload: request,
             }
             this.remainingDecisionMs = deadlineMs
@@ -519,14 +542,17 @@ export class DinoEngine {
     ) {
         const sentAt = this.pending?.sentAtMs ?? this.elapsedMs
         const responseElapsed = this.elapsedMs - sentAt
-        const onTime = responseElapsed <= deadlineMs
+        const speedAtSend = this.pending?.speedPxPerSec ?? this.effectiveSpeed()
+        const ttcAtSend = this.pending?.ttcMs ?? 0
+        const deadlineForChoice = this.responseDeadlineMs(obs, ttcAtSend, speedAtSend, choice)
+        const onTime = responseElapsed <= deadlineForChoice
 
         let result: DecisionResult
         const liveObs = this.obstacles.find((o) => o.id === obs.id)
 
         if (!onTime) {
             result = 'late'
-        } else if (choice !== obs.idealAction) {
+        } else if (!isAcceptableAction(obs.kind, choice)) {
             result = 'wrong'
             if (liveObs) liveObs.move = choice
         } else {
@@ -548,7 +574,7 @@ export class DinoEngine {
             probabilities,
             e2eMs,
             inferenceMs,
-            deadlineMs,
+            deadlineMs: deadlineForChoice,
             result,
             request,
             response,
@@ -566,7 +592,7 @@ export class DinoEngine {
             probabilities: isLaya ? probabilities : null,
             e2eMs: isLaya ? e2eMs : null,
             inferenceMs: isLaya ? inferenceMs : null,
-            deadlineMs,
+            deadlineMs: deadlineForChoice,
             remainingMs: null,
             result,
         }

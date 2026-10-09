@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef } from 'react'
 import { DinoEngine } from '@/lib/game/engine'
-import type { ControllerMode, DifficultyTier, GameAction, LayaDecisionRequest } from '@/lib/game/types'
+import type { ControllerMode, DifficultyTier, GameAction, GameSnapshot, LayaDecisionRequest } from '@/lib/game/types'
 import type { LayaModelChoice } from '@/lib/game/store'
 import { useGameStore } from '@/lib/game/store'
 import { DinoGame } from '@/components/dino/dino-game'
@@ -89,6 +89,7 @@ function StageButton({
 
 export function DinoApp() {
     const engineRef = useRef<DinoEngine | null>(null)
+    const frameSnapshotRef = useRef<GameSnapshot | null>(null)
     const layaWarmedRef = useRef(false)
     const snapshot = useGameStore((s) => s.snapshot)
     const controller = useGameStore((s) => s.controller)
@@ -121,6 +122,9 @@ export function DinoApp() {
                 })
             },
             onLog: (entry) => useGameStore.getState().addLog(entry),
+            onFrame: (snap) => {
+                frameSnapshotRef.current = snap
+            },
             onStatsTick: () => {
                 const eng = engineRef.current
                 if (!eng) return
@@ -138,12 +142,16 @@ export function DinoApp() {
             onPhaseChange: (phase) => {
                 const store = useGameStore.getState()
                 store.setPhase(phase)
-                store.setSnapshot(engineRef.current?.getSnapshot() ?? null)
+                const snap = engineRef.current?.getSnapshot() ?? null
+                frameSnapshotRef.current = snap
+                store.setSnapshot(snap)
             },
         })
         engine.phase = 'warming_up'
         engineRef.current = engine
-        useGameStore.getState().setSnapshot(engine.getSnapshot())
+        const initialSnap = engine.getSnapshot()
+        frameSnapshotRef.current = initialSnap
+        useGameStore.getState().setSnapshot(initialSnap)
 
         return () => engine.stop()
     }, [])
@@ -313,7 +321,7 @@ export function DinoApp() {
                         </div>
                     )}
                     <div className="relative aspect-[960/300] h-auto max-h-[min(42vh,300px)] w-full max-w-[960px]">
-                        <DinoGame snapshot={snapshot} />
+                        <DinoGame snapshot={snapshot} frameSnapshotRef={frameSnapshotRef} />
                         {showVeil && (
                             <div
                                 className="absolute inset-0 z-10 flex items-center justify-center bg-[#1c1915]/45"

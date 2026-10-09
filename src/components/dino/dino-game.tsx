@@ -26,6 +26,7 @@ import type { SceneryProp } from '@/lib/game/scenery'
 
 interface DinoGameProps {
     snapshot: GameSnapshot | null
+    frameSnapshotRef?: React.RefObject<GameSnapshot | null>
 }
 
 function scrollOffset(distance: number, factor: number, tileWidth: number): number {
@@ -38,9 +39,10 @@ function frameForProp(prop: SceneryProp): ManifestFrame {
     return list[prop.variant % list.length] ?? list[0] ?? GROUND_TILE_FRAME
 }
 
-export function DinoGame({ snapshot }: DinoGameProps) {
+export function DinoGame({ snapshot, frameSnapshotRef }: DinoGameProps) {
     const mountRef = useRef<HTMLDivElement>(null)
     const snapRef = useRef(snapshot)
+    const frameRef = frameSnapshotRef
     snapRef.current = snapshot
     const [reducedMotion, setReducedMotion] = useState(false)
 
@@ -155,7 +157,7 @@ export function DinoGame({ snapshot }: DinoGameProps) {
         }
 
         const animate = () => {
-            const snap = snapRef.current
+            const snap = frameRef?.current ?? snapRef.current
             if (snap) {
                 let dinoClip: readonly FrameKey[] = CLIPS.dino.run
                 let dinoIdx = Math.floor(snap.runFrame)

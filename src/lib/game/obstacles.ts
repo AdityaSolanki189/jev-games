@@ -28,6 +28,15 @@ export function idealActionFor(kind: ObstacleKind): GameAction {
     return OBSTACLE_DEFS[kind].idealAction
 }
 
+export function acceptableActions(kind: ObstacleKind): GameAction[] {
+    if (kind === 'bird_low') return ['JUMP', 'DUCK']
+    return [idealActionFor(kind)]
+}
+
+export function isAcceptableAction(kind: ObstacleKind, action: GameAction): boolean {
+    return acceptableActions(kind).includes(action)
+}
+
 export function gapForTier(tier: DifficultyTier, rng: () => number): number {
     const speed = TIER_SPEED[tier]
     const minSeconds = tier === 'easy' ? 5.5 : tier === 'medium' ? 4 : tier === 'hard' ? 3.2 : 2.5

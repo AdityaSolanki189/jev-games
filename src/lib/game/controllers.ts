@@ -47,9 +47,14 @@ export function buildLayaRequest(params: {
             move: {
                 type: 'choice',
                 instructions:
-                    'Choose the safest action for the running dinosaur. Jump over ground obstacles, duck under low flying obstacles, and run straight when the path is clear. Choose one action.',
+                    upcomingKind === 'bird_low'
+                        ? 'Choose the safest action for the running dinosaur. A low-flying bird can be cleared by ducking under it or jumping over it. Ground cacti require a jump. High birds are safe to run under. Choose one action.'
+                        : 'Choose the safest action for the running dinosaur. Jump over ground obstacles, duck under low flying obstacles, and run straight when the path is clear. Choose one action.',
                 criteria: {
-                    JUMP: 'Leap over an obstacle on the ground',
+                    JUMP:
+                        upcomingKind === 'bird_low'
+                            ? 'Leap over a low flying obstacle'
+                            : 'Leap over an obstacle on the ground',
                     DUCK: 'Crouch beneath a low flying obstacle',
                     RUN: 'Continue running without jumping or ducking',
                 },

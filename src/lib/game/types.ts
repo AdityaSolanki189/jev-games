@@ -41,6 +41,7 @@ export interface PendingDecision {
     sentAtMs: number
     deadlineMs: number
     ttcMs: number
+    speedPxPerSec: number
     requestPayload: LayaDecisionRequest
 }
 

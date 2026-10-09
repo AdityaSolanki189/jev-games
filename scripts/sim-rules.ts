@@ -21,6 +21,7 @@ function noopCallbacks() {
         },
         onLog: () => {},
         onStatsTick: () => {},
+        onFrame: () => {},
         onPhaseChange: () => {},
     }
 }
