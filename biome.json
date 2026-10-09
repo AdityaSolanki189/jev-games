@@ -1,5 +1,5 @@
 {
-    "$schema": "https://biomejs.dev/schemas/2.2.7/schema.json",
+    "$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
     "vcs": {
         "enabled": false,
         "clientKind": "git",
@@ -16,7 +16,8 @@
             "!src/db/migrations",
             "!cspell.config.json",
             "!.claude",
-            "!.github"
+            "!.github",
+            "!public"
         ]
     },
     "formatter": {
@@ -40,12 +41,13 @@
             "!.next",
             "!cspell.config.json",
             "!.claude",
-            "!.github"
+            "!.github",
+            "!public"
         ]
     },
     "linter": {
         "rules": {
-            "recommended": true,
+            "preset": "recommended",
             "correctness": {
                 "noChildrenProp": "error",
                 "useExhaustiveDependencies": "warn",
@@ -83,5 +85,10 @@
             "attributePosition": "auto"
         }
     },
-    "html": { "formatter": { "selfCloseVoidElements": "always" } }
+    "html": { "formatter": { "selfCloseVoidElements": "always" } },
+    "css": {
+        "parser": {
+            "tailwindDirectives": true
+        }
+    }
 }

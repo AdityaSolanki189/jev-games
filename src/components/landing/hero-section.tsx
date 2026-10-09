@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { clientConfig } from '@/lib/config/client'
-import { ArrowRight, Github, Star, Users } from 'lucide-react'
+import { ArrowRight, Star, Users } from 'lucide-react'
 import Link from 'next/link'
 import type { Route } from 'next'
 import { useEffect, useState } from 'react'
@@ -95,7 +95,7 @@ export function HeroSection() {
                             </div>
 
                             <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-                                <Github className="h-4 w-4" />
+                                <Star className="h-4 w-4" />
                                 <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
                                 <span>500+ GitHub Stars</span>
                             </div>

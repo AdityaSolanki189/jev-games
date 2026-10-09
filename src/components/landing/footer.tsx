@@ -1,7 +1,7 @@
 import { config } from '@/lib/config/server'
 import Link from 'next/link'
 import type { Route } from 'next'
-import { Github, Twitter, Mail, Heart } from 'lucide-react'
+import { Mail, Heart } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 
 const footerLinks = {
@@ -39,12 +39,12 @@ const socialLinks = [
     {
         name: 'GitHub',
         href: 'https://github.com/your-template',
-        icon: Github,
+        icon: Mail,
     },
     {
         name: 'Twitter',
         href: 'https://twitter.com/your-handle',
-        icon: Twitter,
+        icon: Mail,
     },
     {
         name: 'Email',

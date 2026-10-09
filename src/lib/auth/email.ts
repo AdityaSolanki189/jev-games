@@ -1,7 +1,13 @@
 import { config } from '@/lib/config/server'
 import { Resend } from 'resend'
 
-const resend = new Resend(config.email.resendApiKey)
+function getResend() {
+    const key = process.env.RESEND_API_KEY
+    if (!key) {
+        return null
+    }
+    return new Resend(key)
+}
 
 export async function sendEmail({
     to,
@@ -16,9 +22,15 @@ export async function sendEmail({
     html?: string
     react?: React.ReactElement
 }) {
+    const resend = getResend()
+    if (!resend) {
+        console.warn('Email disabled: RESEND_API_KEY is not set')
+        return { data: null, error: new Error('Email disabled') }
+    }
+
     try {
         return await resend.emails.send({
-            from: config.email.from,
+            from: `${config.app.name} <noreply@${process.env.NEXT_PUBLIC_EMAIL_DOMAIN ?? 'example.com'}>`,
             to,
             subject,
             text,

@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
 import { authClient } from '@/lib/auth/auth-client'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Chrome, Loader2 } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import Link from 'next/link'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
@@ -199,7 +199,7 @@ export function SignUpForm() {
                         </div>
                     ) : (
                         <>
-                            <Chrome />
+                            <span className="text-xs font-bold">G</span>
                             <span>Continue with Google</span>
                         </>
                     )}

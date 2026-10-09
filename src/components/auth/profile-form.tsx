@@ -12,7 +12,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { toast } from 'sonner'
-import { Loader2, Github, Chrome } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import {
     Dialog,
     DialogContent,
@@ -582,7 +582,7 @@ export function ProfileForm({ session }: ProfileFormProps) {
                 <CardContent className="flex flex-col gap-4">
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                            <Github className="h-5 w-5" />
+                            <span className="text-xs font-bold">GH</span>
                             <span>Github</span>
                         </div>
                         {accounts.some((account) => account.providerId === 'github') ? (
@@ -619,7 +619,7 @@ export function ProfileForm({ session }: ProfileFormProps) {
                     </div>
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                            <Chrome className="h-5 w-5" />
+                            <span className="text-xs font-bold">G</span>
                             <span>Google</span>
                         </div>
                         {accounts.some((account) => account.providerId === 'google') ? (

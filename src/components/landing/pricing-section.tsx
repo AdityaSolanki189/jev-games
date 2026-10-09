@@ -3,7 +3,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Check, Star, Github, Heart, ArrowRight } from 'lucide-react'
+import { Check, Star, Heart, ArrowRight } from 'lucide-react'
 import Link from 'next/link'
 import type { Route } from 'next'
 import { motion } from 'framer-motion'
@@ -152,7 +152,7 @@ export function PricingSection() {
                                     {plan.name === 'Free Template' && (
                                         <div className="mt-4 flex items-center justify-center gap-4 text-sm text-gray-600 dark:text-gray-300">
                                             <div className="flex items-center gap-1">
-                                                <Github className="h-4 w-4" />
+                                                <Star className="h-4 w-4" />
                                                 <span>Open Source</span>
                                             </div>
                                             <div className="flex items-center gap-1">
