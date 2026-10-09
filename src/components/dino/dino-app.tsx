@@ -6,6 +6,7 @@ import type { ControllerMode, DifficultyTier, GameAction, LayaDecisionRequest } 
 import type { LayaModelChoice } from '@/lib/game/store'
 import { useGameStore } from '@/lib/game/store'
 import { DinoGame } from '@/components/dino/dino-game'
+import { LiveDecisionCard } from '@/components/dino/live-decision-card'
 import { PerformancePanel } from '@/components/dino/performance-panel'
 import { DecisionLog } from '@/components/dino/decision-log'
 
@@ -300,19 +301,19 @@ export function DinoApp() {
                 </div>
             </header>
             <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px]">
-                <div className="relative flex min-h-0 flex-col items-center justify-center border-b border-[#c9bfb0] bg-[#e8dcc8] lg:border-b-0 lg:border-r">
+                <div className="relative flex min-h-0 flex-col items-center justify-center gap-3 border-b border-[#c9bfb0] bg-[#e8dcc8] px-4 py-3 lg:border-b-0 lg:border-r">
+                    {runState === 'playing' && (
+                        <div className="flex w-full max-w-[960px] justify-end gap-2">
+                            <StageButton variant="primary" onClick={handlePause}>
+                                Pause
+                            </StageButton>
+                            <StageButton variant="outline" onClick={handleReset}>
+                                Reset
+                            </StageButton>
+                        </div>
+                    )}
                     <div className="relative aspect-[960/300] h-auto max-h-[min(42vh,300px)] w-full max-w-[960px]">
                         <DinoGame snapshot={snapshot} />
-                        {runState === 'playing' && (
-                            <div className="absolute top-3 right-3 z-20 flex gap-2">
-                                <StageButton variant="primary" onClick={handlePause}>
-                                    Pause
-                                </StageButton>
-                                <StageButton variant="outline" onClick={handleReset}>
-                                    Reset
-                                </StageButton>
-                            </div>
-                        )}
                         {showVeil && (
                             <div
                                 className="absolute inset-0 z-10 flex items-center justify-center bg-[#1c1915]/45"
@@ -336,6 +337,9 @@ export function DinoApp() {
                                 </div>
                             </div>
                         )}
+                    </div>
+                    <div className="w-full max-w-[960px]">
+                        <LiveDecisionCard liveCall={snapshot?.liveCall} />
                     </div>
                 </div>
                 <div className="hidden min-h-0 lg:block">

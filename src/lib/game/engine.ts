@@ -20,6 +20,7 @@ import type {
     GamePhase,
     GameSnapshot,
     LayaDecisionRequest,
+    LiveDecisionCall,
     ObstacleInstance,
     PendingDecision,
     PlayerPose,
@@ -27,7 +28,24 @@ import type {
 import { DUST_EVENT_TTL_MS } from '@/lib/game/sprite-manifest'
 import { INITIAL_OBSTACLE_START_X, NOSE_X, SENSOR_RANGE_BY_TIER, TIER_SPEED } from '@/lib/game/types'
 
-const CRASH_DURATION_MS = 1200
+const DUCK_BLEND_IN_MS = 120
+const DUCK_BLEND_OUT_MS = 80
+
+function idleLiveCall(controller: ControllerMode): LiveDecisionCall {
+    return {
+        status: 'idle',
+        controller,
+        obstacleLabel: '',
+        question: '',
+        chosenAction: null,
+        probabilities: null,
+        e2eMs: null,
+        inferenceMs: null,
+        deadlineMs: 0,
+        remainingMs: null,
+        result: null,
+    }
+}
 
 export interface EngineCallbacks {
     onDecisionRequest: (payload: {
@@ -87,6 +105,8 @@ export class DinoEngine {
     private lastStatsAt = 0
     private animationId: number | null = null
     private lastFrame = 0
+    liveCall: LiveDecisionCall
+    duckBlend = 0
 
     constructor(tier: DifficultyTier, controller: ControllerMode, seed: number | null, callbacks: EngineCallbacks) {
         this.tier = tier
@@ -96,6 +116,7 @@ export class DinoEngine {
         this.speed = TIER_SPEED[tier]
         this.rng = mulberry32(this.seed)
         this.callbacks = callbacks
+        this.liveCall = idleLiveCall(controller)
         this.resetWorld()
     }
 
@@ -120,6 +141,8 @@ export class DinoEngine {
         this.cameraShake = 0
         this.flashAlpha = 0
         this.dustEvents = []
+        this.duckBlend = 0
+        this.liveCall = idleLiveCall(this.controller)
     }
 
     resetSessionStats() {
@@ -201,13 +224,6 @@ export class DinoEngine {
         if (this.phase === 'warming_up') return
 
         if (this.phase === 'crashed') {
-            if (this.crashStartedAt !== null && this.elapsedMs - this.crashStartedAt >= CRASH_DURATION_MS) {
-                this.restartRun()
-            }
-            this.elapsedMs += dtMs
-            this.pruneDustEvents()
-            this.cameraShake = Math.max(0, this.cameraShake - dtMs * 0.02)
-            this.flashAlpha = Math.max(0, this.flashAlpha - dtMs * 0.003)
             return
         }
 
@@ -233,6 +249,7 @@ export class DinoEngine {
         }
 
         this.updatePlayerAnimation()
+        this.updateDuckBlend(dtMs)
         this.pruneDustEvents()
         this.checkDecisions(speed)
         this.processObstacleMoves(speed)
@@ -254,6 +271,17 @@ export class DinoEngine {
         const tier = order[idx] ?? 'insane'
         this.speed = TIER_SPEED[tier]
         return tier
+    }
+
+    private updateDuckBlend(dtMs: number) {
+        const duckTarget = this.effectivePose() === 'ducking' ? 1 : 0
+        const blendMs = duckTarget === 1 ? DUCK_BLEND_IN_MS : DUCK_BLEND_OUT_MS
+        const step = dtMs / blendMs
+        if (duckTarget > this.duckBlend) {
+            this.duckBlend = Math.min(1, this.duckBlend + step)
+        } else {
+            this.duckBlend = Math.max(0, this.duckBlend - step)
+        }
     }
 
     private updatePlayerAnimation() {
@@ -404,6 +432,20 @@ export class DinoEngine {
             this.decisionsSent += 1
             this.sessionDecisionsSent += 1
 
+            this.liveCall = {
+                status: 'waiting',
+                controller: this.controller,
+                obstacleLabel: request.state.upcoming_obstacle,
+                question: request.questions.move.instructions,
+                chosenAction: null,
+                probabilities: null,
+                e2eMs: null,
+                inferenceMs: null,
+                deadlineMs,
+                remainingMs: deadlineMs,
+                result: null,
+            }
+
             if (this.controller === 'RULES' || this.controller === 'RANDOM') {
                 this.resolveDecisionSync(obs, request, deadlineMs)
             } else {
@@ -423,7 +465,7 @@ export class DinoEngine {
         const choice = this.controller === 'RULES' ? rulesDecision(obs.kind) : randomDecision(this.rng)
         const probabilities = this.controller === 'RULES' ? { [choice]: 1 } : { JUMP: 0.33, DUCK: 0.33, RUN: 0.34 }
         const response = this.controller === 'RULES' ? { local: 'RULES', choice } : { local: 'RANDOM', choice }
-        this.applyDecisionOutcome(obs, request, deadlineMs, choice, probabilities, 0, null, response)
+        this.applyDecisionOutcome(obs, request, deadlineMs, choice, probabilities, null, null, response)
     }
 
     private async resolveDecisionAsync(obs: ObstacleInstance, request: LayaDecisionRequest, deadlineMs: number) {
@@ -471,7 +513,7 @@ export class DinoEngine {
         deadlineMs: number,
         choice: GameAction,
         probabilities: Partial<Record<GameAction, number>>,
-        e2eMs: number,
+        e2eMs: number | null,
         inferenceMs: number | null,
         response: unknown,
     ) {
@@ -491,7 +533,7 @@ export class DinoEngine {
             result = 'on_time'
             this.decisionsOnTime += 1
             this.sessionDecisionsOnTime += 1
-            this.sessionLatencies.push(e2eMs)
+            if (e2eMs !== null) this.sessionLatencies.push(e2eMs)
             if (inferenceMs !== null) this.sessionInferenceLatencies.push(inferenceMs)
             if (liveObs) liveObs.move = choice
         }
@@ -513,6 +555,21 @@ export class DinoEngine {
         })
 
         if (this.pending?.obstacleId === obs.id) this.pending = null
+
+        const isLaya = this.controller === 'LAYA'
+        this.liveCall = {
+            status: 'answered',
+            controller: this.controller,
+            obstacleLabel: request.state.upcoming_obstacle,
+            question: request.questions.move.instructions,
+            chosenAction: choice,
+            probabilities: isLaya ? probabilities : null,
+            e2eMs: isLaya ? e2eMs : null,
+            inferenceMs: isLaya ? inferenceMs : null,
+            deadlineMs,
+            remainingMs: null,
+            result,
+        }
     }
 
     private checkCollisions() {
@@ -537,9 +594,26 @@ export class DinoEngine {
         this.phase = 'crashed'
         this.playerPose = 'crashed'
         this.crashStartedAt = this.elapsedMs
-        this.cameraShake = 1
-        this.flashAlpha = 0.6
+        this.cameraShake = 0
+        this.flashAlpha = 0
         this.callbacks.onPhaseChange(this.phase)
+        this.callbacks.onLog({
+            id: `sep-${Date.now()}`,
+            runId: this.runId,
+            timestamp: Date.now(),
+            obstacleKind: obs.kind,
+            idealAction: obs.idealAction,
+            chosenAction: this.currentAction,
+            probabilities: null,
+            e2eMs: null,
+            inferenceMs: null,
+            deadlineMs: 0,
+            result: 'miss',
+            request: null,
+            response: null,
+            separator: true,
+            separatorLabel: `Run ended — survival ${this.formatTime(this.elapsedMs)} — seed ${this.seed}`,
+        })
         this.callbacks.onLog({
             id: `crash-${obs.id}`,
             runId: this.runId,
@@ -564,31 +638,6 @@ export class DinoEngine {
                 this.cleared += 1
             }
         }
-    }
-
-    private restartRun() {
-        this.callbacks.onLog({
-            id: `sep-${Date.now()}`,
-            runId: this.runId,
-            timestamp: Date.now(),
-            obstacleKind: 'cactus_short',
-            idealAction: 'RUN',
-            chosenAction: null,
-            probabilities: null,
-            e2eMs: null,
-            inferenceMs: null,
-            deadlineMs: 0,
-            result: 'miss',
-            request: null,
-            response: null,
-            separator: true,
-            separatorLabel: `Run ended — survival ${this.formatTime(this.elapsedMs)} — seed ${this.seed}`,
-        })
-        this.runId = `run-${Date.now()}`
-        this.spawnIndex = 6
-        this.resetWorld()
-        this.phase = 'playing'
-        this.callbacks.onPhaseChange(this.phase)
     }
 
     formatTime(ms: number): string {
@@ -637,6 +686,11 @@ export class DinoEngine {
             flashAlpha: this.flashAlpha,
             showSpeedLines: tier === 'insane',
             dustEvents: this.dustEvents.map((d) => ({ x: d.x, frame: Math.floor((this.elapsedMs - d.born) / 80) })),
+            liveCall: {
+                ...this.liveCall,
+                remainingMs: this.liveCall.status === 'waiting' ? this.remainingDecisionMs : this.liveCall.remainingMs,
+            },
+            duckBlend: this.duckBlend,
         }
     }
 }

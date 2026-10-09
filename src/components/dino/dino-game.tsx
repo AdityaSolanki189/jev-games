@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
+import { birdVisual } from '@/lib/game/bird-visual'
 import type { GameSnapshot } from '@/lib/game/types'
 import { GROUND_Y, NOSE_X, WORLD_HEIGHT, WORLD_WIDTH } from '@/lib/game/types'
 import { applyFrame, createSpriteMesh, loadAllSheets, positionWithAnchor } from '@/lib/game/pixel-sprite'
@@ -41,6 +42,15 @@ export function DinoGame({ snapshot }: DinoGameProps) {
     const mountRef = useRef<HTMLDivElement>(null)
     const snapRef = useRef(snapshot)
     snapRef.current = snapshot
+    const [reducedMotion, setReducedMotion] = useState(false)
+
+    useEffect(() => {
+        const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
+        setReducedMotion(mq.matches)
+        const onChange = () => setReducedMotion(mq.matches)
+        mq.addEventListener('change', onChange)
+        return () => mq.removeEventListener('change', onChange)
+    }, [])
 
     useEffect(() => {
         const mount = mountRef.current
@@ -152,24 +162,32 @@ export function DinoGame({ snapshot }: DinoGameProps) {
                 if (snap.playerPose === 'crashed') {
                     dinoClip = CLIPS.dino.dead
                     dinoIdx = 0
-                } else if (snap.playerPose === 'ducking') {
-                    dinoClip = CLIPS.dino.duck
-                } else if (snap.playerPose === 'airborne') {
+                } else {
+                    const duckT = reducedMotion ? (snap.playerPose === 'ducking' ? 1 : 0) : snap.duckBlend
+                    if (duckT >= 0.5) {
+                        dinoClip = CLIPS.dino.duck
+                    }
+                }
+                if (snap.playerPose === 'airborne') {
                     dinoClip = snap.jumpProgress < 0.5 ? CLIPS.dino.jump : CLIPS.dino.fall
                     dinoIdx = 0
                 }
                 const dinoFrame = pickClipFrame(dinoClip, dinoIdx)
                 applyFrame(runnerMesh, textures, dinoFrame)
                 positionWithAnchor(runnerMesh, dinoFrame, 0, 0, 0)
-                runnerGroup.position.set(Math.round(NOSE_X), Math.round(GROUND_Y + snap.playerY), 1)
-                runnerGroup.rotation.z = snap.playerPose === 'crashed' ? Math.sin(snap.runFrame * 0.5) * 0.8 : 0
+                const duckT = reducedMotion ? (snap.playerPose === 'ducking' ? 1 : 0) : snap.duckBlend
+                const squatEase = duckT * duckT * (3 - 2 * duckT)
+                const squatPx = Math.round(squatEase * 10)
+                runnerGroup.position.set(Math.round(NOSE_X), Math.round(GROUND_Y + snap.playerY + squatPx), 1)
+                const frozen = snap.phase === 'crashed'
+                runnerGroup.rotation.z = frozen ? 0.35 : 0
 
                 const airFactor = snap.playerPose === 'airborne' ? 0.55 : 1
                 shadow.scale.set(airFactor, airFactor, 1)
                 shadowMat.opacity = 0.12 + 0.1 * airFactor
                 shadow.position.set(Math.round(NOSE_X), Math.round(GROUND_Y + snap.playerY + 2), 0.55)
 
-                if (snap.cameraShake > 0) {
+                if (!frozen && snap.cameraShake > 0) {
                     camera.position.x = (Math.random() - 0.5) * 8 * snap.cameraShake
                     camera.position.y = (Math.random() - 0.5) * 4 * snap.cameraShake
                 } else {
@@ -219,14 +237,17 @@ export function DinoGame({ snapshot }: DinoGameProps) {
                     if (isBird) {
                         frame = pickClipFrame(CLIPS.bird.flap, Math.floor(snap.runFrame * 2))
                         applyFrame(mesh, textures, frame)
-                        positionWithAnchor(
-                            mesh,
-                            frame,
-                            obs.x + obs.width / 2,
-                            GROUND_Y + obs.yOffset + obs.height / 2,
+                        const visual = birdVisual(obs)
+                        const sx = visual.displayW / frame.displayW
+                        const sy = visual.displayH / frame.displayH
+                        mesh.scale.set(sx, sy, 1)
+                        mesh.position.set(
+                            Math.round(obs.x + obs.width / 2),
+                            Math.round(visual.feetY - visual.displayH / 2),
                             0.5,
                         )
                     } else {
+                        mesh.scale.set(1, 1, 1)
                         applyFrame(mesh, textures, frame)
                         positionWithAnchor(mesh, frame, obs.x + obs.width / 2, GROUND_Y + obs.yOffset, 0.5)
                     }
@@ -276,13 +297,9 @@ export function DinoGame({ snapshot }: DinoGameProps) {
             renderer.dispose()
             mount.removeChild(renderer.domElement)
         }
-    }, [])
+    }, [reducedMotion])
 
     const snap = snapshot
-    const deadlinePct =
-        snap?.remainingDecisionMs != null && snap.remainingDecisionMs > 0
-            ? Math.min(100, (snap.remainingDecisionMs / 1200) * 100)
-            : 0
 
     return (
         <div className="relative h-full w-full">
@@ -298,32 +315,6 @@ export function DinoGame({ snapshot }: DinoGameProps) {
                 <div className="space-y-1 text-right">
                     <p className="text-[10px] text-[#5c5348]">SCORE</p>
                     <p className="text-lg">{snap?.score ?? 0}</p>
-                </div>
-            </div>
-            <div className="pointer-events-none absolute bottom-2 left-3 right-3 space-y-2">
-                <div className="flex items-end justify-between gap-4">
-                    <div>
-                        <p className="font-[family-name:var(--font-display)] text-[10px] text-[#5c5348]">
-                            CURRENT DECISION
-                        </p>
-                        <p className="font-[family-name:var(--font-display)] text-xl text-[#c87830]">
-                            {snap?.currentAction ?? '—'}
-                        </p>
-                    </div>
-                    {snap?.remainingDecisionMs != null && (
-                        <div className="min-w-[120px]">
-                            <p className="text-right text-[10px] text-[#5c5348]">REMAINING WINDOW</p>
-                            <p className="text-right font-[family-name:var(--font-display)] text-base">
-                                {Math.round(snap.remainingDecisionMs)} ms
-                            </p>
-                        </div>
-                    )}
-                </div>
-                <div className="h-1.5 overflow-hidden rounded-full bg-[#d4cbb8]">
-                    <div
-                        className="h-full bg-[#e07828] transition-[width] duration-100"
-                        style={{ width: `${deadlinePct}%` }}
-                    />
                 </div>
             </div>
         </div>

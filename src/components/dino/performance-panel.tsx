@@ -19,11 +19,11 @@ function formatSurvival(ms: number) {
     return `${String(m).padStart(2, '0')}:${String(rs).padStart(2, '0')}`
 }
 
-const phaseLabel: Record<GamePhase, string> = {
-    warming_up: 'WARMING UP',
-    playing: 'AI PLAYING',
-    crashed: 'CRASHED',
-    restarting: 'RESTARTING',
+function playingLabel(controller: string): string {
+    if (controller === 'LAYA') return 'LAYA PLAYING'
+    if (controller === 'RULES') return 'RULES PLAYING'
+    if (controller === 'RANDOM') return 'RANDOM PLAYING'
+    return `${controller} PLAYING`
 }
 
 export function PerformancePanel() {
@@ -36,11 +36,19 @@ export function PerformancePanel() {
     const sessionDecisionCount = useGameStore((s) => s.sessionDecisionCount)
     const seed = useGameStore((s) => s.seed)
     const runState = useGameStore((s) => s.runState)
+    const controller = useGameStore((s) => s.controller)
 
     const phase = snapshot?.phase ?? 'warming_up'
     const tier = (snapshot?.tier ?? 'easy') as DifficultyTier
+    const phaseLabel: Record<GamePhase, string> = {
+        warming_up: 'WARMING UP',
+        playing: playingLabel(controller),
+        crashed: 'CRASHED',
+        restarting: 'RESTARTING',
+    }
     const statusLabel =
         runState === 'idle' ? 'READY' : runState === 'paused' ? 'PAUSED' : (phaseLabel[phase] ?? phase.toUpperCase())
+    const inferLabel = controller === 'LAYA' && medianInference > 0 ? `${Math.round(medianInference)} ms` : '—'
 
     return (
         <div className="flex h-full flex-col gap-3 p-4">
@@ -68,7 +76,7 @@ export function PerformancePanel() {
                 <Stat label="Obstacles dodged" value={String(obstaclesCleared)} />
                 <Stat label="Session median e2e" value={`${Math.round(medianE2e)} ms`} />
                 <Stat label="Session deadline OK" value={`${deadlineSuccess}%`} />
-                <Stat label="Session infer med." value={`${Math.round(medianInference)} ms`} />
+                <Stat label="Session infer med." value={inferLabel} />
                 <Stat label="Session decisions" value={String(sessionDecisionCount)} />
                 <Stat label="Speed / tier" value={`${Math.round(snapshot?.speed ?? 0)} · ${tier}`} />
             </div>

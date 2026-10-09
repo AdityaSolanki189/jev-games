@@ -72,6 +72,22 @@ export interface LayaDecisionResponse {
     }
 }
 
+export type LiveCallStatus = 'idle' | 'waiting' | 'answered'
+
+export interface LiveDecisionCall {
+    status: LiveCallStatus
+    controller: ControllerMode
+    obstacleLabel: string
+    question: string
+    chosenAction: GameAction | null
+    probabilities: Partial<Record<GameAction, number>> | null
+    e2eMs: number | null
+    inferenceMs: number | null
+    deadlineMs: number
+    remainingMs: number | null
+    result: DecisionResult | null
+}
+
 export interface DecisionLogEntry {
     id: string
     runId: string
@@ -108,6 +124,8 @@ export interface GameSnapshot {
     flashAlpha: number
     showSpeedLines: boolean
     dustEvents: { x: number; frame: number }[]
+    liveCall: LiveDecisionCall
+    duckBlend: number
 }
 
 export const TIER_SPEED: Record<DifficultyTier, number> = {
