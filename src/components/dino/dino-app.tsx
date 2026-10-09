@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { DinoEngine } from '@/lib/game/engine'
 import type { ControllerMode, DifficultyTier, GameAction, LayaDecisionRequest } from '@/lib/game/types'
+import type { LayaModelChoice } from '@/lib/game/store'
 import { useGameStore } from '@/lib/game/store'
 import { DinoGame } from '@/components/dino/dino-game'
 import { PerformancePanel } from '@/components/dino/performance-panel'
@@ -12,9 +13,9 @@ const WARMUP_REQUEST: LayaDecisionRequest = {
     state: {
         player: 'Running on the ground',
         upcoming_obstacle: 'A tall cactus on the ground',
-        distance_pixels: 400,
-        speed_pixels_per_second: 250,
-        time_to_collision_ms: 1600,
+        distance_pixels: 600,
+        speed_pixels_per_second: 160,
+        time_to_collision_ms: 3750,
         next_obstacle: 'none',
     },
     questions: {
@@ -30,33 +31,23 @@ async function fetchDecision(
     controller: ControllerMode,
     request: LayaDecisionRequest,
     obstacleKind: string,
-    warmup = false,
+    options: { warmup?: boolean; model?: LayaModelChoice } = {},
 ) {
+    const { warmup = false, model = 'default' } = options
     const started = performance.now()
-    console.log('[decide/client] → POST /api/decide', {
-        controller,
-        warmup,
-        obstacleKind,
-        upcoming: request.state.upcoming_obstacle,
-        time_to_collision_ms: request.state.time_to_collision_ms,
-    })
-
     const res = await fetch('/api/decide', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ controller, request, obstacleKind, warmup }),
+        body: JSON.stringify({
+            controller,
+            request,
+            obstacleKind,
+            warmup,
+            model: model === 'multilingual' ? 'multilingual' : undefined,
+        }),
     })
     const data = await res.json()
     const e2eMs = performance.now() - started
-
-    console.log('[decide/client] ←', {
-        controller,
-        warmup,
-        status: res.status,
-        e2eMs: Math.round(e2eMs),
-        choice: data.choice ?? null,
-        error: data.error ?? null,
-    })
 
     if (!res.ok) {
         throw new Error(data.error ?? 'Decision failed')
@@ -97,8 +88,10 @@ function StageButton({
 
 export function DinoApp() {
     const engineRef = useRef<DinoEngine | null>(null)
+    const layaWarmedRef = useRef(false)
     const snapshot = useGameStore((s) => s.snapshot)
     const controller = useGameStore((s) => s.controller)
+    const layaModel = useGameStore((s) => s.layaModel)
     const startTier = useGameStore((s) => s.startTier)
     const seed = useGameStore((s) => s.seed)
     const runState = useGameStore((s) => s.runState)
@@ -106,6 +99,7 @@ export function DinoApp() {
     const addLog = useGameStore((s) => s.addLog)
     const setPhase = useGameStore((s) => s.setPhase)
     const setController = useGameStore((s) => s.setController)
+    const setLayaModel = useGameStore((s) => s.setLayaModel)
     const setStartTier = useGameStore((s) => s.setStartTier)
     const setSeed = useGameStore((s) => s.setSeed)
     const setRunState = useGameStore((s) => s.setRunState)
@@ -113,13 +107,17 @@ export function DinoApp() {
     const resetRunStats = useGameStore((s) => s.resetRunStats)
 
     const controllerRef = useRef(controller)
+    const layaModelRef = useRef(layaModel)
     controllerRef.current = controller
+    layaModelRef.current = layaModel
 
     useEffect(() => {
         const initial = useGameStore.getState()
         const engine = new DinoEngine(initial.startTier, initial.controller, initial.seed, {
             onDecisionRequest: async ({ obstacle, request }) => {
-                return fetchDecision(controllerRef.current, request, obstacle.kind)
+                return fetchDecision(controllerRef.current, request, obstacle.kind, {
+                    model: layaModelRef.current,
+                })
             },
             onLog: (entry) => useGameStore.getState().addLog(entry),
             onStatsTick: () => {
@@ -129,10 +127,11 @@ export function DinoApp() {
                 store.setSnapshot(eng.getSnapshot())
                 store.setRunStats({
                     survivalMs: eng.elapsedMs,
-                    medianE2e: eng.median(eng.latencies),
-                    medianInference: eng.median(eng.inferenceLatencies),
+                    medianE2e: eng.median(eng.sessionLatencies),
+                    medianInference: eng.median(eng.sessionInferenceLatencies),
                     deadlineSuccess: eng.deadlineSuccessRate(),
                     obstaclesCleared: eng.cleared,
+                    sessionDecisionCount: eng.sessionDecisionsSent,
                 })
             },
             onPhaseChange: (phase) => {
@@ -153,14 +152,17 @@ export function DinoApp() {
     }, [controller])
 
     const runWarmup = useCallback(async () => {
-        if (controller !== 'LAYA') return
+        if (controller !== 'LAYA' || layaWarmedRef.current) return
         try {
-            await fetchDecision(controller, WARMUP_REQUEST, 'cactus_tall', true)
+            await fetchDecision(controller, WARMUP_REQUEST, 'cactus_tall', {
+                warmup: true,
+                model: layaModel,
+            })
+            layaWarmedRef.current = true
         } catch (err) {
-            const eng = engineRef.current
             addLog({
                 id: `warmup-err-${Date.now()}`,
-                runId: eng?.runId ?? 'warmup',
+                runId: engineRef.current?.runId ?? 'warmup',
                 timestamp: Date.now(),
                 obstacleKind: 'cactus_tall',
                 idealAction: 'JUMP',
@@ -174,7 +176,7 @@ export function DinoApp() {
                 response: err instanceof Error ? err.message : 'Warmup failed',
             })
         }
-    }, [addLog, controller])
+    }, [addLog, controller, layaModel])
 
     const beginPlaying = useCallback(() => {
         const engine = engineRef.current
@@ -208,8 +210,10 @@ export function DinoApp() {
         const engine = engineRef.current
         if (!engine) return
         engine.stop()
+        engine.resetSessionStats()
         engine.resetWorld()
         engine.phase = 'warming_up'
+        layaWarmedRef.current = false
         clearLogs()
         resetRunStats()
         setRunState('idle')
@@ -244,6 +248,18 @@ export function DinoApp() {
                             <option value="LAYA">LAYA</option>
                             <option value="RULES">RULES</option>
                             <option value="RANDOM">RANDOM</option>
+                        </select>
+                    </label>
+                    <label className="flex items-center gap-1">
+                        Laya model
+                        <select
+                            className="rounded border border-[#c9bfb0] bg-white px-2 py-1"
+                            value={layaModel}
+                            onChange={(e) => setLayaModel(e.target.value as LayaModelChoice)}
+                            disabled={runState === 'playing'}
+                        >
+                            <option value="default">Server default</option>
+                            <option value="multilingual">multilingual</option>
                         </select>
                     </label>
                     <label className="flex items-center gap-1">
@@ -283,42 +299,44 @@ export function DinoApp() {
                     </button>
                 </div>
             </header>
-            <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[1fr_320px]">
-                <div className="relative min-h-[200px] border-b border-[#c9bfb0] lg:border-b-0 lg:border-r">
-                    <DinoGame snapshot={snapshot} />
-                    {runState === 'playing' && (
-                        <div className="absolute top-3 right-3 z-20 flex gap-2">
-                            <StageButton variant="primary" onClick={handlePause}>
-                                Pause
-                            </StageButton>
-                            <StageButton variant="outline" onClick={handleReset}>
-                                Reset
-                            </StageButton>
-                        </div>
-                    )}
-                    {showVeil && (
-                        <div
-                            className="absolute inset-0 z-10 flex items-center justify-center bg-[#1c1915]/45"
-                            aria-hidden={false}
-                        >
-                            <div className="dino-veil-panel flex flex-wrap items-center justify-center gap-3 p-4">
-                                {runState === 'idle' ? (
-                                    <StageButton variant="primary" onClick={() => void handleStartOrResume()}>
-                                        Start
-                                    </StageButton>
-                                ) : (
-                                    <>
-                                        <StageButton variant="primary" onClick={() => void handleStartOrResume()}>
-                                            Resume
-                                        </StageButton>
-                                        <StageButton variant="ghost" onClick={handleReset}>
-                                            Reset
-                                        </StageButton>
-                                    </>
-                                )}
+            <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px]">
+                <div className="relative flex min-h-0 flex-col items-center justify-center border-b border-[#c9bfb0] bg-[#e8dcc8] lg:border-b-0 lg:border-r">
+                    <div className="relative aspect-[960/300] h-auto max-h-[min(42vh,300px)] w-full max-w-[960px]">
+                        <DinoGame snapshot={snapshot} />
+                        {runState === 'playing' && (
+                            <div className="absolute top-3 right-3 z-20 flex gap-2">
+                                <StageButton variant="primary" onClick={handlePause}>
+                                    Pause
+                                </StageButton>
+                                <StageButton variant="outline" onClick={handleReset}>
+                                    Reset
+                                </StageButton>
                             </div>
-                        </div>
-                    )}
+                        )}
+                        {showVeil && (
+                            <div
+                                className="absolute inset-0 z-10 flex items-center justify-center bg-[#1c1915]/45"
+                                aria-hidden={false}
+                            >
+                                <div className="dino-veil-panel flex flex-wrap items-center justify-center gap-3 p-4">
+                                    {runState === 'idle' ? (
+                                        <StageButton variant="primary" onClick={() => void handleStartOrResume()}>
+                                            Start
+                                        </StageButton>
+                                    ) : (
+                                        <>
+                                            <StageButton variant="primary" onClick={() => void handleStartOrResume()}>
+                                                Resume
+                                            </StageButton>
+                                            <StageButton variant="ghost" onClick={handleReset}>
+                                                Reset
+                                            </StageButton>
+                                        </>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </div>
                 </div>
                 <div className="hidden min-h-0 lg:block">
                     <PerformancePanel />

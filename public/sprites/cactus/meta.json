@@ -1,0 +1,22 @@
+{
+  "short": {
+    "width": 480,
+    "height": 611
+  },
+  "tall": {
+    "width": 480,
+    "height": 611
+  },
+  "bush": {
+    "width": 480,
+    "height": 611
+  },
+  "tree": {
+    "width": 480,
+    "height": 611
+  },
+  "cluster": {
+    "width": 220,
+    "height": 140
+  }
+}

@@ -1,6 +1,6 @@
 /**
- * Generates public/sprites/atlas.png (256×256 pixel art atlas).
- * Run: node scripts/generate-atlas.mjs
+ * Generates public/sprites/atlas.png (512×512 pixel art atlas).
+ * Run: pnpm run sprites:atlas
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -8,8 +8,8 @@ import { fileURLToPath } from 'node:url'
 import zlib from 'node:zlib'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const W = 256
-const H = 256
+const W = 512
+const H = 512
 const pixels = new Uint8Array(W * H * 4)
 
 function setPixel(x, y, r, g, b, a = 255) {
@@ -21,44 +21,64 @@ function setPixel(x, y, r, g, b, a = 255) {
     pixels[i + 3] = a
 }
 
-function fillRect(x, y, w, h, r, g, b) {
+function fillRect(x, y, w, h, r, g, b, a = 255) {
     for (let py = y; py < y + h; py++) {
-        for (let px = x; px < x + w; px++) setPixel(px, py, r, g, b)
+        for (let px = x; px < x + w; px++) setPixel(px, py, r, g, b, a)
     }
 }
 
 const ink = [28, 25, 21]
-const bone = [243, 239, 228]
-const green = [58, 122, 72]
-const sand = [212, 196, 168]
+const bone = [247, 243, 234]
+const green = [46, 110, 62]
+const sand = [232, 220, 196]
 const orange = [224, 120, 48]
 
-fillRect(0, 0, W, H, ...sand)
-
-for (let f = 0; f < 6; f++) {
-    const ox = f * 32
-    fillRect(ox + 8, 8, 16, 28, ...ink)
-    fillRect(ox + 20, 12 + (f % 2) * 4, 8, 4, ...ink)
-    fillRect(ox + 4, 20, 6, 8, ...ink)
+for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) setPixel(x, y, ...sand, 0)
 }
 
-fillRect(192, 8, 20, 32, ...ink)
-fillRect(216, 8, 16, 40, ...ink)
-fillRect(236, 8, 28, 30, ...green)
-fillRect(192, 48, 72, 8, ...green)
-
-for (let f = 0; f < 4; f++) {
-    fillRect(f * 16, 56, 14, 10, ...orange)
-    fillRect(f * 16 + 4, 54 + (f % 2), 8, 4, ...orange)
+function dinoRunFrame(ox, legUp) {
+    fillRect(ox + 10, 12, 18, 28, ...ink)
+    fillRect(ox + 26, 16, 12, 10, ...ink)
+    fillRect(ox + 6, 34 + (legUp ? 0 : 4), 8, 10, ...ink)
+    fillRect(ox + 22, 34 + (legUp ? 4 : 0), 8, 10, ...ink)
+    fillRect(ox + 30, 18, 14, 4, ...ink)
 }
 
-fillRect(0, 72, 64, 8, ...bone)
-fillRect(0, 88, 128, 24, sand[0], sand[1], sand[2])
-fillRect(0, 112, 64, 16, sand[0] - 20, sand[1] - 20, sand[2] - 20)
+for (let f = 0; f < 6; f++) dinoRunFrame(8 + f * 48, f % 2 === 0)
 
-for (let f = 0; f < 4; f++) fillRect(140 + f * 8, 96, 6, 6, ...bone)
+fillRect(296, 8, 18, 32, ...ink)
+fillRect(314, 12, 12, 10, ...ink)
+fillRect(292, 36, 8, 10, ...ink)
 
-fillRect(200, 88, 24, 24, 255, 220, 120)
+fillRect(8, 64, 44, 22, ...ink)
+fillRect(68, 66, 44, 20, ...ink)
+fillRect(128, 68, 44, 24, ...ink)
+
+fillRect(8, 120, 20, 36, ...green)
+fillRect(14, 108, 8, 12, ...green)
+fillRect(40, 120, 24, 48, ...green)
+fillRect(76, 120, 40, 40, ...green)
+
+function pteroFrame(ox, oy, wingUp) {
+    fillRect(ox + 12, oy + 8, 14, 8, ...ink)
+    fillRect(ox + 24, oy + 10, 8, 4, ...ink)
+    if (wingUp) {
+        fillRect(ox + 2, oy + 2, 10, 6, ...ink)
+        fillRect(ox + 22, oy + 4, 12, 4, ...ink)
+    } else {
+        fillRect(ox + 4, oy + 14, 12, 4, ...ink)
+        fillRect(ox + 20, oy + 12, 12, 6, ...ink)
+    }
+    fillRect(ox + 10, oy + 16, 6, 4, ...orange)
+}
+
+for (let f = 0; f < 4; f++) pteroFrame(224 + f * 40, 152, f % 2 === 0)
+
+fillRect(8, 184, 64, 12, ...bone)
+fillRect(8, 204, 256, 20, sand[0] - 18, sand[1] - 18, sand[2] - 18)
+fillRect(280, 184, 46, 14, 255, 255, 255, 200)
+fillRect(340, 184, 28, 28, 255, 220, 120)
 
 function crc32(buf) {
     let c = ~0

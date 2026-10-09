@@ -33,6 +33,7 @@ export function PerformancePanel() {
     const medianInference = useGameStore((s) => s.medianInference)
     const deadlineSuccess = useGameStore((s) => s.deadlineSuccess)
     const obstaclesCleared = useGameStore((s) => s.obstaclesCleared)
+    const sessionDecisionCount = useGameStore((s) => s.sessionDecisionCount)
     const seed = useGameStore((s) => s.seed)
     const runState = useGameStore((s) => s.runState)
 
@@ -65,9 +66,10 @@ export function PerformancePanel() {
             <div className="grid grid-cols-2 gap-2">
                 <Stat label="Survival time" value={formatSurvival(survivalMs)} />
                 <Stat label="Obstacles dodged" value={String(obstaclesCleared)} />
-                <Stat label="Median latency" value={`${Math.round(medianE2e)} ms`} />
-                <Stat label="Deadline success" value={`${deadlineSuccess}%`} />
-                <Stat label="Inference median" value={`${Math.round(medianInference)} ms`} />
+                <Stat label="Session median e2e" value={`${Math.round(medianE2e)} ms`} />
+                <Stat label="Session deadline OK" value={`${deadlineSuccess}%`} />
+                <Stat label="Session infer med." value={`${Math.round(medianInference)} ms`} />
+                <Stat label="Session decisions" value={String(sessionDecisionCount)} />
                 <Stat label="Speed / tier" value={`${Math.round(snapshot?.speed ?? 0)} · ${tier}`} />
             </div>
             <div className="mt-auto border-t border-[#c9bfb0] pt-3 text-xs text-[#6b6358]">

@@ -1,0 +1,162 @@
+{
+  "clouds": [
+    {
+      "id": "cloud-0",
+      "width": 216,
+      "height": 92,
+      "displayW": 108,
+      "displayH": 46
+    },
+    {
+      "id": "cloud-1",
+      "width": 207,
+      "height": 101,
+      "displayW": 104,
+      "displayH": 51
+    },
+    {
+      "id": "cloud-2",
+      "width": 255,
+      "height": 56,
+      "displayW": 128,
+      "displayH": 28
+    },
+    {
+      "id": "cloud-3",
+      "width": 96,
+      "height": 47,
+      "displayW": 48,
+      "displayH": 24
+    },
+    {
+      "id": "cloud-4",
+      "width": 207,
+      "height": 101,
+      "displayW": 104,
+      "displayH": 51
+    },
+    {
+      "id": "cloud-5",
+      "width": 216,
+      "height": 92,
+      "displayW": 108,
+      "displayH": 46
+    },
+    {
+      "id": "cloud-6",
+      "width": 255,
+      "height": 57,
+      "displayW": 128,
+      "displayH": 29
+    },
+    {
+      "id": "cloud-7",
+      "width": 96,
+      "height": 48,
+      "displayW": 48,
+      "displayH": 24
+    }
+  ],
+  "plants": [
+    {
+      "id": "plant-0",
+      "role": "tree",
+      "width": 16,
+      "height": 29,
+      "displayW": 32,
+      "displayH": 58
+    },
+    {
+      "id": "plant-1",
+      "role": "tree",
+      "width": 16,
+      "height": 30,
+      "displayW": 32,
+      "displayH": 60
+    },
+    {
+      "id": "plant-2",
+      "role": "bush",
+      "width": 18,
+      "height": 14,
+      "displayW": 36,
+      "displayH": 28
+    },
+    {
+      "id": "plant-3",
+      "role": "bush",
+      "width": 9,
+      "height": 16,
+      "displayW": 18,
+      "displayH": 32
+    },
+    {
+      "id": "plant-4",
+      "role": "bush",
+      "width": 14,
+      "height": 13,
+      "displayW": 28,
+      "displayH": 26
+    },
+    {
+      "id": "plant-5",
+      "role": "bush",
+      "width": 12,
+      "height": 15,
+      "displayW": 24,
+      "displayH": 30
+    },
+    {
+      "id": "plant-6",
+      "role": "bush",
+      "width": 9,
+      "height": 8,
+      "displayW": 18,
+      "displayH": 16
+    },
+    {
+      "id": "plant-7",
+      "role": "bush",
+      "width": 14,
+      "height": 13,
+      "displayW": 28,
+      "displayH": 26
+    },
+    {
+      "id": "plant-8",
+      "role": "bush",
+      "width": 9,
+      "height": 15,
+      "displayW": 18,
+      "displayH": 30
+    },
+    {
+      "id": "plant-9",
+      "role": "bush",
+      "width": 9,
+      "height": 8,
+      "displayW": 18,
+      "displayH": 16
+    },
+    {
+      "id": "plant-10",
+      "role": "bush",
+      "width": 9,
+      "height": 11,
+      "displayW": 18,
+      "displayH": 22
+    }
+  ],
+  "ground": {
+    "id": "ground",
+    "width": 128,
+    "height": 32,
+    "displayW": 128,
+    "displayH": 32
+  },
+  "sky": {
+    "width": 1024,
+    "height": 640,
+    "bytes": 34440
+  }
+}

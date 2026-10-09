@@ -6,6 +6,7 @@ import type { GameAction, ObstacleKind } from '@/lib/game/types'
 
 const bodySchema = z.object({
     warmup: z.boolean().optional(),
+    model: z.string().optional(),
     controller: z.enum(['LAYA', 'RULES', 'RANDOM']).optional(),
     obstacleKind: z.enum(['cactus_short', 'cactus_tall', 'cactus_cluster', 'bird_low', 'bird_high']).optional(),
     request: z
@@ -43,12 +44,12 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 })
     }
 
-    const { warmup, controller, obstacleKind, request } = parsed.data
+    const { warmup, model, controller, obstacleKind, request } = parsed.data
 
     if (warmup) {
         if (request && controller !== 'RULES' && controller !== 'RANDOM') {
             try {
-                await callLayaSystemOne(request, { kind: 'warmup' })
+                await callLayaSystemOne(request, { kind: 'warmup', model })
             } catch (err) {
                 return NextResponse.json(
                     {
@@ -92,7 +93,7 @@ export async function POST(req: Request) {
     }
 
     try {
-        const result = await callLayaSystemOne(request, { kind: 'decision' })
+        const result = await callLayaSystemOne(request, { kind: 'decision', model })
         return NextResponse.json({
             choice: result.choice as GameAction,
             probabilities: result.probabilities,

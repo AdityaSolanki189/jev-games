@@ -29,6 +29,11 @@ export interface ObstacleInstance {
     yOffset: number
     cleared: boolean
     decisionSent: boolean
+    /** Set when AI responds in time; executed in the game loop at the physical window. */
+    move: GameAction | null
+    moveExecuted: boolean
+    /** Latest ms after detection to receive a decision that can still be executed. */
+    maneuverDeadlineMs: number
 }
 
 export interface PendingDecision {
@@ -86,6 +91,7 @@ export interface DecisionLogEntry {
 }
 
 export interface GameSnapshot {
+    seed: number
     distance: number
     score: number
     speed: number
@@ -105,15 +111,21 @@ export interface GameSnapshot {
 }
 
 export const TIER_SPEED: Record<DifficultyTier, number> = {
-    easy: 250,
-    medium: 350,
-    hard: 450,
-    insane: 600,
+    easy: 160,
+    medium: 240,
+    hard: 340,
+    insane: 480,
 }
 
 export const NOSE_X = 96
-export const SENSOR_RANGE_PX = 400
-export const JUMP_LEAD_MS = 180
-export const GROUND_Y = 0
-export const WORLD_HEIGHT = 180
-export const WORLD_WIDTH = 900
+export const SENSOR_RANGE_BY_TIER: Record<DifficultyTier, number> = {
+    easy: 600,
+    medium: 520,
+    hard: 440,
+    insane: 360,
+}
+export const GROUND_Y = 48
+export const WORLD_HEIGHT = 300
+export const WORLD_WIDTH = 960
+/** First obstacle spawns beyond sensor + margin so warmup can finish first. */
+export const INITIAL_OBSTACLE_START_X = NOSE_X + SENSOR_RANGE_BY_TIER.easy + 320

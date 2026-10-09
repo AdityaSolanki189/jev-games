@@ -17,7 +17,12 @@
         "db:migrate": "drizzle-kit migrate --config=drizzle.config.ts",
         "db:push": "drizzle-kit push --config=drizzle.config.ts",
         "db:studio": "drizzle-kit studio --config=drizzle.config.ts",
-        "sprites:atlas": "node scripts/generate-atlas.mjs"
+        "sprites:atlas": "node scripts/generate-atlas.mjs",
+        "sprites:cactus": "node scripts/recolor-cactus.mjs",
+        "sprites:birds": "node scripts/flip-birds.mjs",
+        "sprites:scenery": "node scripts/extract-scenery.mjs",
+        "sim:rules": "tsx scripts/sim-rules.ts",
+        "bench:laya": "tsx scripts/bench-laya.ts"
     },
     "dependencies": {
         "@hookform/resolvers": "^5.9.1",

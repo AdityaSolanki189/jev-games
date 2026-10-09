@@ -2,44 +2,39 @@
 
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
-import type { GameSnapshot, ObstacleKind } from '@/lib/game/types'
-import { ATLAS_SIZE, FRAMES, pickFrame } from '@/lib/game/sprite-frames'
-import { WORLD_HEIGHT, WORLD_WIDTH } from '@/lib/game/types'
+import type { GameSnapshot } from '@/lib/game/types'
+import { GROUND_Y, NOSE_X, WORLD_HEIGHT, WORLD_WIDTH } from '@/lib/game/types'
+import { applyFrame, createSpriteMesh, loadAllSheets, positionWithAnchor } from '@/lib/game/pixel-sprite'
+import { sceneryForWindow, sceneryScreenX } from '@/lib/game/scenery'
+import {
+    BUSH_FRAMES,
+    CLIPS,
+    CLOUD_FRAMES,
+    type FrameKey,
+    getFrame,
+    GROUND_TILE_FRAME,
+    type ManifestFrame,
+    OBSTACLE_FRAME,
+    pickClipFrame,
+    SCENERY_PARALLAX,
+    SHEETS,
+    SKY_FRAME,
+    TREE_FRAMES,
+} from '@/lib/game/sprite-manifest'
+import type { SceneryProp } from '@/lib/game/scenery'
 
 interface DinoGameProps {
     snapshot: GameSnapshot | null
 }
 
-function uvRect(frame: { x: number; y: number; w: number; h: number }) {
-    return {
-        u0: frame.x / ATLAS_SIZE,
-        v0: 1 - (frame.y + frame.h) / ATLAS_SIZE,
-        u1: (frame.x + frame.w) / ATLAS_SIZE,
-        v1: 1 - frame.y / ATLAS_SIZE,
-    }
+function scrollOffset(distance: number, factor: number, tileWidth: number): number {
+    const raw = (distance * factor) % tileWidth
+    return raw - tileWidth
 }
 
-function makeSprite(
-    texture: THREE.Texture,
-    frame: { x: number; y: number; w: number; h: number },
-    w: number,
-    h: number,
-): THREE.Mesh {
-    const { u0, v0, u1, v1 } = uvRect(frame)
-    const geo = new THREE.PlaneGeometry(w, h)
-    const mat = new THREE.MeshBasicMaterial({
-        map: texture,
-        transparent: true,
-        depthWrite: false,
-    })
-    geo.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array([u0, v1, u1, v1, u0, v0, u1, v0]), 2))
-    return new THREE.Mesh(geo, mat)
-}
-
-function cactusFrame(kind: ObstacleKind) {
-    if (kind === 'cactus_tall') return FRAMES.cactusTall
-    if (kind === 'cactus_cluster') return FRAMES.cactusCluster
-    return FRAMES.cactusShort
+function frameForProp(prop: SceneryProp): ManifestFrame {
+    const list = prop.slot === 'cloud' ? CLOUD_FRAMES : prop.slot === 'tree' ? TREE_FRAMES : BUSH_FRAMES
+    return list[prop.variant % list.length] ?? list[0] ?? GROUND_TILE_FRAME
 }
 
 export function DinoGame({ snapshot }: DinoGameProps) {
@@ -52,60 +47,55 @@ export function DinoGame({ snapshot }: DinoGameProps) {
         if (!mount) return
 
         const scene = new THREE.Scene()
-        scene.background = new THREE.Color('#e8dcc8')
+        scene.background = new THREE.Color('#7ec8f0')
 
         const camera = new THREE.OrthographicCamera(0, WORLD_WIDTH, WORLD_HEIGHT, 0, 0.1, 1000)
         camera.position.z = 10
 
         const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: false })
-        renderer.setPixelRatio(Math.min(2, window.devicePixelRatio))
+        renderer.setPixelRatio(1)
+        renderer.setSize(WORLD_WIDTH, WORLD_HEIGHT, false)
+        renderer.domElement.style.width = '100%'
+        renderer.domElement.style.height = '100%'
+        renderer.domElement.style.imageRendering = 'pixelated'
         mount.appendChild(renderer.domElement)
 
         const loader = new THREE.TextureLoader()
-        const texture = loader.load('/sprites/atlas.png')
-        texture.magFilter = THREE.NearestFilter
-        texture.minFilter = THREE.NearestFilter
-        texture.colorSpace = THREE.SRGBColorSpace
+        const textures = loadAllSheets(loader, SHEETS)
 
-        const runnerGroup = new THREE.Group()
-        const runnerMesh = makeSprite(texture, pickFrame(FRAMES.run, 0), 32, 36)
-        runnerGroup.add(runnerMesh)
-        runnerGroup.position.set(96, WORLD_HEIGHT - 36, 1)
-        scene.add(runnerGroup)
+        const skyMesh = createSpriteMesh(textures, SKY_FRAME)
+        positionWithAnchor(skyMesh, SKY_FRAME, WORLD_WIDTH / 2, WORLD_HEIGHT / 2, -4)
+        scene.add(skyMesh)
 
+        const groundFrame = GROUND_TILE_FRAME
+        const groundTileW = groundFrame.displayW
         const groundMeshes: THREE.Mesh[] = []
-        for (let i = 0; i < 20; i++) {
-            const g = makeSprite(texture, FRAMES.ground, 64, 8)
-            g.position.set(i * 64, WORLD_HEIGHT - 8, 0)
+        for (let i = 0; i < Math.ceil(WORLD_WIDTH / groundTileW) + 3; i++) {
+            const g = createSpriteMesh(textures, groundFrame)
+            positionWithAnchor(g, groundFrame, i * groundTileW, GROUND_Y + 8 - groundFrame.displayH, 0)
             scene.add(g)
             groundMeshes.push(g)
         }
 
-        const duneNear = makeSprite(texture, FRAMES.duneNear, 128, 24)
-        duneNear.position.set(200, WORLD_HEIGHT - 40, -1)
-        scene.add(duneNear)
-        const duneFar = makeSprite(texture, FRAMES.duneFar, 64, 16)
-        duneFar.position.set(100, WORLD_HEIGHT - 52, -2)
-        scene.add(duneFar)
-
-        const sun = makeSprite(texture, FRAMES.sun, 24, 24)
-        sun.position.set(WORLD_WIDTH - 40, 24, -3)
-        scene.add(sun)
-
-        const clouds: THREE.Mesh[] = []
-        for (let i = 0; i < 3; i++) {
-            const c = makeSprite(texture, FRAMES.cloud, 32, 8)
-            c.position.set(120 + i * 180, 36 + i * 8, -2)
-            scene.add(c)
-            clouds.push(c)
-        }
-
+        const sceneryMeshes = new Map<string, THREE.Mesh>()
         const obstacleMeshes = new Map<string, THREE.Mesh>()
+        const dustMeshes = new Map<string, THREE.Mesh>()
+
+        const runnerGroup = new THREE.Group()
+        const runnerMesh = createSpriteMesh(textures, pickClipFrame(CLIPS.dino.run, 0))
+        runnerGroup.add(runnerMesh)
+        scene.add(runnerGroup)
+
+        const shadowMat = new THREE.MeshBasicMaterial({ color: '#1c1915', transparent: true, opacity: 0.22 })
+        const shadow = new THREE.Mesh(new THREE.PlaneGeometry(28, 6), shadowMat)
+        shadow.position.z = 0.55
+        scene.add(shadow)
+
         const speedLines: THREE.Mesh[] = []
         for (let i = 0; i < 5; i++) {
             const line = new THREE.Mesh(
                 new THREE.PlaneGeometry(40, 2),
-                new THREE.MeshBasicMaterial({ color: '#1c1915', transparent: true, opacity: 0.15 }),
+                new THREE.MeshBasicMaterial({ color: '#1c1915', transparent: true, opacity: 0.12 }),
             )
             line.visible = false
             line.position.z = 2
@@ -120,47 +110,64 @@ export function DinoGame({ snapshot }: DinoGameProps) {
         flash.position.set(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, 5)
         scene.add(flash)
 
-        let parallax = 0
         let raf = 0
 
         const resize = () => {
-            const rect = mount.getBoundingClientRect()
-            const aspect = WORLD_WIDTH / WORLD_HEIGHT
-            let w = rect.width
-            let h = rect.height
-            if (w / h > aspect) w = h * aspect
-            else h = w / aspect
-            renderer.setSize(w, h, false)
-            renderer.domElement.style.width = `${w}px`
-            renderer.domElement.style.height = `${h}px`
+            renderer.setSize(WORLD_WIDTH, WORLD_HEIGHT, false)
         }
         resize()
         const ro = new ResizeObserver(resize)
         ro.observe(mount)
 
+        const syncScenery = (snap: GameSnapshot) => {
+            const props = sceneryForWindow(snap.seed, snap.distance)
+            const active = new Set(props.map((p) => p.id))
+            for (const [id, mesh] of sceneryMeshes) {
+                if (!active.has(id)) {
+                    scene.remove(mesh)
+                    mesh.geometry.dispose()
+                    ;(mesh.material as THREE.Material).dispose()
+                    sceneryMeshes.delete(id)
+                }
+            }
+            for (const prop of props) {
+                let mesh = sceneryMeshes.get(prop.id)
+                const frame = frameForProp(prop)
+                if (!mesh) {
+                    mesh = createSpriteMesh(textures, frame)
+                    mesh.scale.set(prop.scale, prop.scale, 1)
+                    scene.add(mesh)
+                    sceneryMeshes.set(prop.id, mesh)
+                }
+                const sx = sceneryScreenX(prop, snap.distance)
+                positionWithAnchor(mesh, frame, sx, prop.y, prop.z)
+            }
+        }
+
         const animate = () => {
             const snap = snapRef.current
             if (snap) {
-                const runIdx = Math.floor(snap.runFrame) % FRAMES.run.length
-                let frame = pickFrame(FRAMES.run, runIdx)
-                if (snap.playerPose === 'airborne') frame = FRAMES.jump
-                else if (snap.playerPose === 'ducking') {
-                    const di = Math.floor(snap.runFrame) % 2
-                    frame = pickFrame(FRAMES.duck, di)
-                } else if (snap.playerPose === 'crashed') frame = FRAMES.crash
-
-                const { u0, v0, u1, v1 } = uvRect(frame)
-                const uv = runnerMesh.geometry.getAttribute('uv') as THREE.BufferAttribute
-                uv.setXY(0, u0, v1)
-                uv.setXY(1, u1, v1)
-                uv.setXY(2, u0, v0)
-                uv.setXY(3, u1, v0)
-                uv.needsUpdate = true
-
-                const h = snap.playerPose === 'ducking' ? 24 : 36
-                runnerMesh.scale.y = h / 36
-                runnerGroup.position.y = WORLD_HEIGHT - h - snap.playerY
+                let dinoClip: readonly FrameKey[] = CLIPS.dino.run
+                let dinoIdx = Math.floor(snap.runFrame)
+                if (snap.playerPose === 'crashed') {
+                    dinoClip = CLIPS.dino.dead
+                    dinoIdx = 0
+                } else if (snap.playerPose === 'ducking') {
+                    dinoClip = CLIPS.dino.duck
+                } else if (snap.playerPose === 'airborne') {
+                    dinoClip = snap.jumpProgress < 0.5 ? CLIPS.dino.jump : CLIPS.dino.fall
+                    dinoIdx = 0
+                }
+                const dinoFrame = pickClipFrame(dinoClip, dinoIdx)
+                applyFrame(runnerMesh, textures, dinoFrame)
+                positionWithAnchor(runnerMesh, dinoFrame, 0, 0, 0)
+                runnerGroup.position.set(Math.round(NOSE_X), Math.round(GROUND_Y + snap.playerY), 1)
                 runnerGroup.rotation.z = snap.playerPose === 'crashed' ? Math.sin(snap.runFrame * 0.5) * 0.8 : 0
+
+                const airFactor = snap.playerPose === 'airborne' ? 0.55 : 1
+                shadow.scale.set(airFactor, airFactor, 1)
+                shadowMat.opacity = 0.12 + 0.1 * airFactor
+                shadow.position.set(Math.round(NOSE_X), Math.round(GROUND_Y + snap.playerY + 2), 0.55)
 
                 if (snap.cameraShake > 0) {
                     camera.position.x = (Math.random() - 0.5) * 8 * snap.cameraShake
@@ -170,24 +177,27 @@ export function DinoGame({ snapshot }: DinoGameProps) {
                     camera.position.y = 0
                 }
 
-                flash.material.opacity = snap.flashAlpha
+                ;(flash.material as THREE.MeshBasicMaterial).opacity = snap.flashAlpha
 
-                parallax += snap.speed * 0.0004
-                duneNear.position.x = 200 - ((parallax * 80) % 400)
-                duneFar.position.x = 100 - ((parallax * 40) % 300)
-                for (let i = 0; i < clouds.length; i++) {
-                    const c = clouds[i]
-                    if (c) c.position.x = (120 + i * 180 - parallax * 20 * (i + 1)) % (WORLD_WIDTH + 80)
+                const groundScroll = scrollOffset(snap.distance, SCENERY_PARALLAX.ground, groundTileW)
+                for (let i = 0; i < groundMeshes.length; i++) {
+                    const g = groundMeshes[i]
+                    if (g) {
+                        positionWithAnchor(
+                            g,
+                            groundFrame,
+                            i * groundTileW + groundScroll,
+                            GROUND_Y + 8 - groundFrame.displayH,
+                            0,
+                        )
+                    }
                 }
 
-                for (const g of groundMeshes) {
-                    g.position.x -= snap.speed * 0.016
-                    if (g.position.x < -64) g.position.x += 64 * groundMeshes.length
-                }
+                syncScenery(snap)
 
-                const activeIds = new Set(snap.obstacles.map((o) => o.id))
+                const activeObs = new Set(snap.obstacles.map((o) => o.id))
                 for (const [id, mesh] of obstacleMeshes) {
-                    if (!activeIds.has(id)) {
+                    if (!activeObs.has(id)) {
                         scene.remove(mesh)
                         mesh.geometry.dispose()
                         ;(mesh.material as THREE.Material).dispose()
@@ -197,34 +207,60 @@ export function DinoGame({ snapshot }: DinoGameProps) {
 
                 for (const obs of snap.obstacles) {
                     let mesh = obstacleMeshes.get(obs.id)
+                    const isBird = obs.kind.startsWith('bird')
+                    let frame = isBird
+                        ? pickClipFrame(CLIPS.bird.flap, Math.floor(snap.runFrame * 2))
+                        : getFrame(OBSTACLE_FRAME[obs.kind])
                     if (!mesh) {
-                        const fr = obs.kind.startsWith('bird') ? pickFrame(FRAMES.bird, 0) : cactusFrame(obs.kind)
-                        const mw = obs.kind.startsWith('bird') ? 28 : obs.width + 8
-                        const mh = obs.kind.startsWith('bird') ? 14 : obs.height + 4
-                        mesh = makeSprite(texture, fr, mw, mh)
+                        mesh = createSpriteMesh(textures, frame)
                         scene.add(mesh)
                         obstacleMeshes.set(obs.id, mesh)
                     }
-                    if (obs.kind.startsWith('bird')) {
-                        const bi = Math.floor(snap.runFrame * 2) % 4
-                        const bf = pickFrame(FRAMES.bird, bi)
-                        const { u0, v0, u1, v1 } = uvRect(bf)
-                        const uv = mesh.geometry.getAttribute('uv') as THREE.BufferAttribute
-                        uv.setXY(0, u0, v1)
-                        uv.setXY(1, u1, v1)
-                        uv.setXY(2, u0, v0)
-                        uv.setXY(3, u1, v0)
-                        uv.needsUpdate = true
+                    if (isBird) {
+                        frame = pickClipFrame(CLIPS.bird.flap, Math.floor(snap.runFrame * 2))
+                        applyFrame(mesh, textures, frame)
+                        positionWithAnchor(
+                            mesh,
+                            frame,
+                            obs.x + obs.width / 2,
+                            GROUND_Y + obs.yOffset + obs.height / 2,
+                            0.5,
+                        )
+                    } else {
+                        applyFrame(mesh, textures, frame)
+                        positionWithAnchor(mesh, frame, obs.x + obs.width / 2, GROUND_Y + obs.yOffset, 0.5)
                     }
-                    mesh.position.set(obs.x + obs.width / 2, WORLD_HEIGHT - 8 - obs.yOffset - obs.height / 2, 0.5)
                 }
 
+                const activeDust = new Set(snap.dustEvents.map((_, i) => `dust-${i}`))
+                for (const [id, mesh] of dustMeshes) {
+                    if (!activeDust.has(id)) {
+                        scene.remove(mesh)
+                        mesh.geometry.dispose()
+                        ;(mesh.material as THREE.Material).dispose()
+                        dustMeshes.delete(id)
+                    }
+                }
+                snap.dustEvents.forEach((ev, i) => {
+                    const id = `dust-${i}`
+                    let mesh = dustMeshes.get(id)
+                    const dustFrame = pickClipFrame(CLIPS.fx.dust, ev.frame)
+                    if (!mesh) {
+                        mesh = createSpriteMesh(textures, dustFrame)
+                        scene.add(mesh)
+                        dustMeshes.set(id, mesh)
+                    }
+                    applyFrame(mesh, textures, dustFrame)
+                    positionWithAnchor(mesh, dustFrame, ev.x, GROUND_Y, 1.2)
+                })
+
+                const parallax = snap.distance * 0.0004
                 for (let i = 0; i < speedLines.length; i++) {
                     const line = speedLines[i]
                     if (!line) continue
                     line.visible = snap.showSpeedLines
                     if (snap.showSpeedLines) {
-                        line.position.set(200 + i * 120 - ((parallax * 200) % 100), 60 + i * 22, 2)
+                        line.position.set(200 + i * 120 - ((parallax * 200) % 100), GROUND_Y + 40 + i * 18, 2)
                     }
                 }
             }
@@ -245,12 +281,15 @@ export function DinoGame({ snapshot }: DinoGameProps) {
     const snap = snapshot
     const deadlinePct =
         snap?.remainingDecisionMs != null && snap.remainingDecisionMs > 0
-            ? Math.min(100, (snap.remainingDecisionMs / 800) * 100)
+            ? Math.min(100, (snap.remainingDecisionMs / 1200) * 100)
             : 0
 
     return (
-        <div className="relative flex h-full w-full flex-col">
-            <div ref={mountRef} className="relative flex flex-1 items-center justify-center bg-[#e8dcc8]" />
+        <div className="relative h-full w-full">
+            <div
+                ref={mountRef}
+                className="absolute inset-0 [&_canvas]:h-full [&_canvas]:w-full [&_canvas]:object-contain"
+            />
             <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-between p-3 font-[family-name:var(--font-display)] text-sm tracking-wide">
                 <div className="space-y-1">
                     <p className="text-[10px] text-[#5c5348]">DISTANCE</p>
@@ -261,26 +300,26 @@ export function DinoGame({ snapshot }: DinoGameProps) {
                     <p className="text-lg">{snap?.score ?? 0}</p>
                 </div>
             </div>
-            <div className="pointer-events-none absolute bottom-3 left-3 right-3 space-y-2">
+            <div className="pointer-events-none absolute bottom-2 left-3 right-3 space-y-2">
                 <div className="flex items-end justify-between gap-4">
                     <div>
                         <p className="font-[family-name:var(--font-display)] text-[10px] text-[#5c5348]">
                             CURRENT DECISION
                         </p>
-                        <p className="font-[family-name:var(--font-display)] text-2xl text-[#c87830]">
+                        <p className="font-[family-name:var(--font-display)] text-xl text-[#c87830]">
                             {snap?.currentAction ?? '—'}
                         </p>
                     </div>
                     {snap?.remainingDecisionMs != null && (
-                        <div className="min-w-[140px]">
+                        <div className="min-w-[120px]">
                             <p className="text-right text-[10px] text-[#5c5348]">REMAINING WINDOW</p>
-                            <p className="text-right font-[family-name:var(--font-display)] text-lg">
+                            <p className="text-right font-[family-name:var(--font-display)] text-base">
                                 {Math.round(snap.remainingDecisionMs)} ms
                             </p>
                         </div>
                     )}
                 </div>
-                <div className="h-2 overflow-hidden rounded-full bg-[#d4cbb8]">
+                <div className="h-1.5 overflow-hidden rounded-full bg-[#d4cbb8]">
                     <div
                         className="h-full bg-[#e07828] transition-[width] duration-100"
                         style={{ width: `${deadlinePct}%` }}

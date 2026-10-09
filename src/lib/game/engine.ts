@@ -1,6 +1,16 @@
 import { appendObstacle, generateInitialStream, obstacleHitbox, obstacleLabel } from '@/lib/game/obstacles'
-import { randomDecision, rulesDecision } from '@/lib/game/controllers'
+import { buildLayaRequest, randomDecision, rulesDecision } from '@/lib/game/controllers'
 import { mulberry32, randomSeed } from '@/lib/game/rng'
+import {
+    DUCK_START_LEAD_MS,
+    JUMP_DURATION_MS,
+    jumpOffsetAt,
+    latestJumpStartLeadMs,
+    RUNNER_LEFT,
+    runnerHitboxLogical,
+    runnerRight,
+    timeToHitboxContactMs,
+} from '@/lib/game/physics'
 import type {
     ControllerMode,
     DecisionLogEntry,
@@ -14,16 +24,9 @@ import type {
     PendingDecision,
     PlayerPose,
 } from '@/lib/game/types'
-import { GROUND_Y, JUMP_LEAD_MS, NOSE_X, SENSOR_RANGE_PX, TIER_SPEED, WORLD_WIDTH } from '@/lib/game/types'
-import { buildLayaRequest } from '@/lib/game/controllers'
+import { DUST_EVENT_TTL_MS } from '@/lib/game/sprite-manifest'
+import { INITIAL_OBSTACLE_START_X, NOSE_X, SENSOR_RANGE_BY_TIER, TIER_SPEED } from '@/lib/game/types'
 
-const RUNNER_STAND_H = 44
-const RUNNER_DUCK_H = 22
-const RUNNER_W = 40
-const JUMP_DURATION_MS = 520
-const JUMP_PEAK = 58
-const DUCK_DURATION_MS = 420
-const DUCK_SPEED_MULT = 0.85
 const CRASH_DURATION_MS = 1200
 
 export interface EngineCallbacks {
@@ -61,7 +64,7 @@ export class DinoEngine {
     jumpStartedAt: number | null = null
     duckStartedAt: number | null = null
     crashStartedAt: number | null = null
-    scheduledAction: { action: GameAction; executeAtMs: number } | null = null
+    duckHoldObstacleId: string | null = null
     pending: PendingDecision | null = null
     currentAction: GameAction | null = null
     remainingDecisionMs: number | null = null
@@ -73,10 +76,14 @@ export class DinoEngine {
     lastObstacleX = 0
     rng: () => number
     callbacks: EngineCallbacks
+    /** Per-run decision counters (reset each life). */
     decisionsSent = 0
     decisionsOnTime = 0
-    latencies: number[] = []
-    inferenceLatencies: number[] = []
+    /** Session-wide latency samples (survive crash / restart). */
+    sessionLatencies: number[] = []
+    sessionInferenceLatencies: number[] = []
+    sessionDecisionsSent = 0
+    sessionDecisionsOnTime = 0
     private lastStatsAt = 0
     private animationId: number | null = null
     private lastFrame = 0
@@ -93,28 +100,33 @@ export class DinoEngine {
     }
 
     resetWorld() {
-        this.obstacles = generateInitialStream(this.seed, this.tier, WORLD_WIDTH + 80)
-        this.lastObstacleX = this.obstacles[this.obstacles.length - 1]?.x ?? WORLD_WIDTH
+        this.obstacles = generateInitialStream(this.seed, this.tier, INITIAL_OBSTACLE_START_X)
+        this.lastObstacleX = this.obstacles[this.obstacles.length - 1]?.x ?? INITIAL_OBSTACLE_START_X
         this.distance = 0
         this.score = 0
         this.cleared = 0
         this.elapsedMs = 0
         this.decisionsSent = 0
         this.decisionsOnTime = 0
-        this.latencies = []
-        this.inferenceLatencies = []
         this.speed = TIER_SPEED[this.tier]
         this.playerPose = 'running'
         this.jumpStartedAt = null
         this.duckStartedAt = null
         this.crashStartedAt = null
-        this.scheduledAction = null
+        this.duckHoldObstacleId = null
         this.pending = null
         this.currentAction = null
         this.remainingDecisionMs = null
         this.cameraShake = 0
         this.flashAlpha = 0
         this.dustEvents = []
+    }
+
+    resetSessionStats() {
+        this.sessionLatencies = []
+        this.sessionInferenceLatencies = []
+        this.sessionDecisionsSent = 0
+        this.sessionDecisionsOnTime = 0
     }
 
     setTier(tier: DifficultyTier) {
@@ -132,34 +144,6 @@ export class DinoEngine {
         this.rng = mulberry32(seed)
         this.spawnIndex = 6
         this.resetWorld()
-    }
-
-    async warmup() {
-        this.phase = 'warming_up'
-        this.callbacks.onPhaseChange(this.phase)
-        try {
-            const dummy = this.obstacles[0]
-            if (dummy) {
-                const req = buildLayaRequest({
-                    player: 'Running on the ground',
-                    upcomingKind: dummy.kind,
-                    distancePx: SENSOR_RANGE_PX,
-                    speed: this.speed,
-                    ttcMs: (SENSOR_RANGE_PX / this.speed) * 1000,
-                    nextLabel: 'none',
-                })
-                await this.callbacks.onDecisionRequest({
-                    obstacle: dummy,
-                    request: req,
-                    deadlineMs: 9999,
-                    ttcMs: 9999,
-                })
-            }
-        } catch {
-            /* warmup failure is logged by client */
-        }
-        this.phase = 'playing'
-        this.callbacks.onPhaseChange(this.phase)
     }
 
     start() {
@@ -180,6 +164,10 @@ export class DinoEngine {
         }
     }
 
+    private sensorRange(): number {
+        return SENSOR_RANGE_BY_TIER[this.currentTier()]
+    }
+
     private playerStateLabel(): string {
         if (this.playerPose === 'airborne') return 'Airborne'
         if (this.playerPose === 'ducking') return 'Ducking'
@@ -187,26 +175,25 @@ export class DinoEngine {
         return 'Running on the ground'
     }
 
+    private effectivePose(): PlayerPose {
+        if (this.shouldStayDucked(this.speed)) return 'ducking'
+        return this.playerPose
+    }
+
     private runnerHitbox(): { left: number; right: number; bottom: number; top: number } {
-        const h = this.playerPose === 'ducking' ? RUNNER_DUCK_H : RUNNER_STAND_H
-        const jumpY = this.getJumpOffset()
-        const bottom = GROUND_Y + jumpY
-        const top = bottom + h
-        return { left: NOSE_X - 8, right: NOSE_X + RUNNER_W, bottom, top }
+        const pose = this.effectivePose()
+        return runnerHitboxLogical({
+            pose: pose === 'crashed' ? 'running' : pose,
+            jumpOffset: pose === 'airborne' ? this.getJumpOffset() : 0,
+        })
     }
 
     getJumpOffset(): number {
         if (this.jumpStartedAt === null) return 0
-        const t = (this.elapsedMs - this.jumpStartedAt) / JUMP_DURATION_MS
-        if (t >= 1) return 0
-        return Math.sin(t * Math.PI) * JUMP_PEAK
+        return jumpOffsetAt(this.elapsedMs - this.jumpStartedAt)
     }
 
     private effectiveSpeed(): number {
-        if (this.playerPose === 'ducking' && this.duckStartedAt !== null) {
-            const duckT = this.elapsedMs - this.duckStartedAt
-            if (duckT < DUCK_DURATION_MS) return this.speed * DUCK_SPEED_MULT
-        }
         return this.speed
     }
 
@@ -218,6 +205,7 @@ export class DinoEngine {
                 this.restartRun()
             }
             this.elapsedMs += dtMs
+            this.pruneDustEvents()
             this.cameraShake = Math.max(0, this.cameraShake - dtMs * 0.02)
             this.flashAlpha = Math.max(0, this.flashAlpha - dtMs * 0.003)
             return
@@ -244,9 +232,11 @@ export class DinoEngine {
             this.obstacles.push(next)
         }
 
-        this.updatePlayerAnimation(dtMs)
-        this.processScheduledActions()
+        this.updatePlayerAnimation()
+        this.pruneDustEvents()
         this.checkDecisions(speed)
+        this.processObstacleMoves(speed)
+        this.updateDuckHold()
         this.checkCollisions()
         this.markCleared()
 
@@ -266,42 +256,102 @@ export class DinoEngine {
         return tier
     }
 
-    private updatePlayerAnimation(_dtMs: number) {
+    private updatePlayerAnimation() {
         if (this.jumpStartedAt !== null) {
             const t = this.elapsedMs - this.jumpStartedAt
             if (t >= JUMP_DURATION_MS) {
                 this.jumpStartedAt = null
-                if (this.playerPose === 'airborne') this.playerPose = 'running'
+                if (this.playerPose === 'airborne') {
+                    this.playerPose = 'running'
+                    this.dustEvents.push({ x: NOSE_X, frame: 0, born: this.elapsedMs })
+                }
             } else {
                 this.playerPose = 'airborne'
             }
         }
-        if (this.duckStartedAt !== null) {
-            const t = this.elapsedMs - this.duckStartedAt
-            if (t >= DUCK_DURATION_MS) {
-                this.duckStartedAt = null
-                if (this.playerPose === 'ducking') this.playerPose = 'running'
+    }
+
+    private pruneDustEvents() {
+        this.dustEvents = this.dustEvents.filter((d) => this.elapsedMs - d.born < DUST_EVENT_TTL_MS)
+    }
+
+    private shouldStayDucked(_speed: number): boolean {
+        for (const obs of this.obstacles) {
+            if (obs.cleared || obs.move !== 'DUCK') continue
+            if (obs.x + obs.width < RUNNER_LEFT - 4) continue
+            if (obs.x > runnerRight() + 80) continue
+            return true
+        }
+        return false
+    }
+
+    private updateDuckHold() {
+        if (this.playerPose !== 'ducking') return
+        if (!this.shouldStayDucked(this.speed)) {
+            this.releaseDuck()
+        }
+    }
+
+    private releaseDuck() {
+        this.duckHoldObstacleId = null
+        this.duckStartedAt = null
+        if (this.playerPose === 'ducking') this.playerPose = 'running'
+    }
+
+    private startJump() {
+        if (this.shouldStayDucked(this.speed)) return
+        if (this.playerPose === 'airborne' || this.jumpStartedAt !== null) return
+        this.jumpStartedAt = this.elapsedMs
+        this.playerPose = 'airborne'
+        this.dustEvents.push({ x: NOSE_X, frame: 0, born: this.elapsedMs })
+    }
+
+    private startDuckFor(obstacleId: string) {
+        if (this.playerPose === 'airborne') {
+            this.jumpStartedAt = null
+            this.playerPose = 'running'
+        }
+        this.duckHoldObstacleId = obstacleId
+        this.duckStartedAt = this.elapsedMs
+        this.playerPose = 'ducking'
+    }
+
+    private processObstacleMoves(speed: number) {
+        const contactMsFor = (obs: ObstacleInstance) => timeToHitboxContactMs(obs, speed)
+
+        for (const obs of this.obstacles) {
+            if (obs.cleared || obs.move !== 'DUCK' || obs.moveExecuted) continue
+            const contactMs = contactMsFor(obs)
+            const duckLead = DUCK_START_LEAD_MS + 180
+            const notPassed = obs.x + obs.width >= RUNNER_LEFT - 4
+            if (notPassed && contactMs <= duckLead) {
+                this.currentAction = 'DUCK'
+                this.startDuckFor(obs.id)
+                obs.moveExecuted = true
             }
         }
-    }
 
-    private processScheduledActions() {
-        if (!this.scheduledAction) return
-        if (this.elapsedMs >= this.scheduledAction.executeAtMs) {
-            this.applyAction(this.scheduledAction.action)
-            this.scheduledAction = null
-        }
-    }
+        for (const obs of this.obstacles) {
+            if (obs.cleared || obs.move === null || obs.moveExecuted) continue
+            const contactMs = contactMsFor(obs)
 
-    private applyAction(action: GameAction) {
-        this.currentAction = action
-        if (action === 'JUMP' && this.playerPose !== 'airborne' && this.jumpStartedAt === null) {
-            this.jumpStartedAt = this.elapsedMs
-            this.playerPose = 'airborne'
-            this.dustEvents.push({ x: NOSE_X, frame: 0, born: this.elapsedMs })
-        } else if (action === 'DUCK' && this.playerPose === 'running') {
-            this.duckStartedAt = this.elapsedMs
-            this.playerPose = 'ducking'
+            if (obs.move === 'RUN') {
+                if (contactMs <= 0) {
+                    obs.moveExecuted = true
+                    this.currentAction = 'RUN'
+                }
+                continue
+            }
+
+            if (obs.move === 'JUMP') {
+                if (this.shouldStayDucked(speed)) continue
+                const lead = latestJumpStartLeadMs(obs, speed)
+                if (contactMs <= lead) {
+                    this.currentAction = 'JUMP'
+                    this.startJump()
+                    obs.moveExecuted = true
+                }
+            }
         }
     }
 
@@ -310,20 +360,34 @@ export class DinoEngine {
         return next ? obstacleLabel(next.kind) : 'none'
     }
 
+    private maneuverDeadlineMs(obs: ObstacleInstance, speed: number, distanceToContact: number): number {
+        const ttcContact = (distanceToContact / speed) * 1000
+        if (obs.idealAction === 'JUMP') {
+            return Math.max(0, ttcContact - latestJumpStartLeadMs(obs, speed))
+        }
+        if (obs.idealAction === 'DUCK') {
+            return Math.max(0, ttcContact - DUCK_START_LEAD_MS - 80)
+        }
+        return Math.max(0, ttcContact - 100)
+    }
+
     private checkDecisions(speed: number) {
+        const range = this.sensorRange()
         for (const obs of this.obstacles) {
             if (obs.decisionSent || obs.cleared) continue
-            const distanceToNose = obs.x - NOSE_X
-            if (distanceToNose > SENSOR_RANGE_PX) continue
-            if (distanceToNose <= 0) continue
+            const distanceToContact = obs.x - runnerRight()
+            if (distanceToContact > range) continue
+            if (distanceToContact <= 0) continue
 
             obs.decisionSent = true
-            const ttcMs = (distanceToNose / speed) * 1000
-            const deadlineMs = ttcMs - JUMP_LEAD_MS
+            const ttcMs = (distanceToContact / speed) * 1000
+            const deadlineMs = this.maneuverDeadlineMs(obs, speed, distanceToContact)
+            obs.maneuverDeadlineMs = deadlineMs
+
             const request = buildLayaRequest({
                 player: this.playerStateLabel(),
                 upcomingKind: obs.kind,
-                distancePx: distanceToNose,
+                distancePx: distanceToContact,
                 speed,
                 ttcMs,
                 nextLabel: this.nextObstacleLabel(obs),
@@ -338,8 +402,13 @@ export class DinoEngine {
             }
             this.remainingDecisionMs = deadlineMs
             this.decisionsSent += 1
+            this.sessionDecisionsSent += 1
 
-            void this.resolveDecision(obs, request, deadlineMs, ttcMs)
+            if (this.controller === 'RULES' || this.controller === 'RANDOM') {
+                this.resolveDecisionSync(obs, request, deadlineMs)
+            } else {
+                void this.resolveDecisionAsync(obs, request, deadlineMs)
+            }
         }
 
         if (this.pending) {
@@ -350,46 +419,33 @@ export class DinoEngine {
         }
     }
 
-    private async resolveDecision(
-        obs: ObstacleInstance,
-        request: LayaDecisionRequest,
-        deadlineMs: number,
-        ttcMs: number,
-    ) {
-        const sentWall = performance.now()
-        let choice: GameAction | null = null
-        let probabilities: Partial<Record<GameAction, number>> | null = null
-        let inferenceMs: number | null = null
-        let response: unknown = null
-        let result: DecisionResult = 'miss'
-        let e2eMs: number | null = null
+    private resolveDecisionSync(obs: ObstacleInstance, request: LayaDecisionRequest, deadlineMs: number) {
+        const choice = this.controller === 'RULES' ? rulesDecision(obs.kind) : randomDecision(this.rng)
+        const probabilities = this.controller === 'RULES' ? { [choice]: 1 } : { JUMP: 0.33, DUCK: 0.33, RUN: 0.34 }
+        const response = this.controller === 'RULES' ? { local: 'RULES', choice } : { local: 'RANDOM', choice }
+        this.applyDecisionOutcome(obs, request, deadlineMs, choice, probabilities, 0, null, response)
+    }
 
+    private async resolveDecisionAsync(obs: ObstacleInstance, request: LayaDecisionRequest, deadlineMs: number) {
+        const sentWall = performance.now()
         try {
-            if (this.controller === 'RULES') {
-                choice = rulesDecision(obs.kind)
-                probabilities = { [choice]: 1 }
-                response = { local: 'RULES', choice }
-                e2eMs = 0
-            } else if (this.controller === 'RANDOM') {
-                choice = randomDecision(this.rng)
-                probabilities = { JUMP: 0.33, DUCK: 0.33, RUN: 0.34 }
-                response = { local: 'RANDOM', choice }
-                e2eMs = 0
-            } else {
-                const res = await this.callbacks.onDecisionRequest({
-                    obstacle: obs,
-                    request,
-                    deadlineMs,
-                    ttcMs,
-                })
-                choice = res.choice
-                probabilities = res.probabilities
-                inferenceMs = res.inferenceMs
-                response = res.response
-                e2eMs = res.e2eMs
-            }
+            const res = await this.callbacks.onDecisionRequest({
+                obstacle: obs,
+                request,
+                deadlineMs,
+                ttcMs: request.state.time_to_collision_ms,
+            })
+            this.applyDecisionOutcome(
+                obs,
+                request,
+                deadlineMs,
+                res.choice,
+                res.probabilities,
+                res.e2eMs,
+                res.inferenceMs,
+                res.response,
+            )
         } catch (err) {
-            result = 'miss'
             this.callbacks.onLog({
                 id: `log-${obs.id}`,
                 runId: this.runId,
@@ -401,34 +457,43 @@ export class DinoEngine {
                 e2eMs: performance.now() - sentWall,
                 inferenceMs: null,
                 deadlineMs,
-                result,
+                result: 'miss',
                 request,
                 response: String(err),
             })
-            this.pending = null
-            return
+            if (this.pending?.obstacleId === obs.id) this.pending = null
         }
+    }
 
-        const responseElapsed = this.elapsedMs - (this.pending?.sentAtMs ?? this.elapsedMs)
+    private applyDecisionOutcome(
+        obs: ObstacleInstance,
+        request: LayaDecisionRequest,
+        deadlineMs: number,
+        choice: GameAction,
+        probabilities: Partial<Record<GameAction, number>>,
+        e2eMs: number,
+        inferenceMs: number | null,
+        response: unknown,
+    ) {
+        const sentAt = this.pending?.sentAtMs ?? this.elapsedMs
+        const responseElapsed = this.elapsedMs - sentAt
         const onTime = responseElapsed <= deadlineMs
+
+        let result: DecisionResult
+        const liveObs = this.obstacles.find((o) => o.id === obs.id)
 
         if (!onTime) {
             result = 'late'
         } else if (choice !== obs.idealAction) {
             result = 'wrong'
-            this.applyAction(choice)
+            if (liveObs) liveObs.move = choice
         } else {
             result = 'on_time'
             this.decisionsOnTime += 1
-            if (e2eMs !== null) this.latencies.push(e2eMs)
-            if (inferenceMs !== null) this.inferenceLatencies.push(inferenceMs)
-
-            const executeAt = this.elapsedMs + Math.max(0, ttcMs - JUMP_LEAD_MS - responseElapsed)
-            if (choice === 'RUN') {
-                this.currentAction = 'RUN'
-            } else {
-                this.scheduledAction = { action: choice, executeAtMs: executeAt }
-            }
+            this.sessionDecisionsOnTime += 1
+            this.sessionLatencies.push(e2eMs)
+            if (inferenceMs !== null) this.sessionInferenceLatencies.push(inferenceMs)
+            if (liveObs) liveObs.move = choice
         }
 
         this.callbacks.onLog({
@@ -447,7 +512,7 @@ export class DinoEngine {
             response,
         })
 
-        this.pending = null
+        if (this.pending?.obstacleId === obs.id) this.pending = null
     }
 
     private checkCollisions() {
@@ -456,11 +521,10 @@ export class DinoEngine {
         for (const obs of this.obstacles) {
             if (obs.cleared) continue
             const box = obstacleHitbox(obs)
-            const obsLeft = obs.x
             const obsRight = obs.x + obs.width
             if (obsRight < NOSE_X - 10) continue
 
-            const overlapX = player.right > obsLeft && player.left < obsRight
+            const overlapX = player.right > box.left && player.left < box.right
             const overlapY = player.top > box.bottom && player.bottom < box.top
             if (overlapX && overlapY) {
                 this.triggerCrash(obs)
@@ -518,9 +582,8 @@ export class DinoEngine {
             request: null,
             response: null,
             separator: true,
-            separatorLabel: `Run ended — survival ${this.formatTime(this.elapsedMs)} — new seed ${this.seed + 1}`,
+            separatorLabel: `Run ended — survival ${this.formatTime(this.elapsedMs)} — seed ${this.seed}`,
         })
-        this.seed += 1
         this.runId = `run-${Date.now()}`
         this.spawnIndex = 6
         this.resetWorld()
@@ -549,13 +612,15 @@ export class DinoEngine {
     }
 
     deadlineSuccessRate(): number {
-        if (this.decisionsSent === 0) return 100
-        return Math.round((this.decisionsOnTime / this.decisionsSent) * 100)
+        const sent = this.sessionDecisionsSent
+        if (sent === 0) return 100
+        return Math.round((this.sessionDecisionsOnTime / sent) * 100)
     }
 
     getSnapshot(): GameSnapshot {
         const tier = this.currentTier()
         return {
+            seed: this.seed,
             distance: this.distance,
             score: this.score,
             speed: this.effectiveSpeed(),

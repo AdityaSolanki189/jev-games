@@ -10,6 +10,7 @@ export interface LayaCallResult {
 
 export interface LayaCallOptions {
     kind?: 'warmup' | 'decision'
+    model?: string
 }
 
 const SYSTEMONE_SUFFIX = '/v1/systemone'
@@ -44,7 +45,9 @@ export async function callLayaSystemOne(
             'Content-Type': 'application/json',
             Authorization: `Bearer ${config.laya.apiKey}`,
         },
-        body: JSON.stringify(request),
+        body: JSON.stringify(
+            options.model ? { model: options.model, state: request.state, questions: request.questions } : request,
+        ),
         cache: 'no-store',
     })
 
