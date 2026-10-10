@@ -1,191 +1,90 @@
-# Next.js + Drizzle + Better Auth + Biome Template
+# DINO.AI — Autonomous Runner
 
-A modern, production-ready Next.js template with authentication, database integration, and best practices built-in.
+Chrome Dino–style endless runner where an AI controller chooses **JUMP**, **DUCK**, or **RUN** for each obstacle. The homepage is a live demo focused on **decision latency** (Laya SystemOne) and a side-by-side **performance monitor** and **decision terminal**.
 
-## 🚀 Features
+Built on a Next.js App Router stack (TypeScript, Biome, Tailwind). Auth and database packages remain in the repo but are optional for running the game locally.
 
-- **Next.js 15** with App Router and TypeScript
-- **Better Auth** for authentication (email/password + Google OAuth)
-- **Drizzle ORM** with PostgreSQL support
-- **Biome** for lightning-fast linting and formatting
-- **Tailwind CSS** with shadcn/ui components
-- **Dark/Light theme** support
-- **Email** integration with Resend
-- **File uploads** with UploadThing
-- **Rate limiting** and security headers
-- **Environment validation** with Zod
-- **Pre-commit hooks** with Husky and lint-staged
-- **Spell checking** with cspell
-- **GitHub Actions** for CI/CD
+## What you see
 
-## 🛠️ Quick Start
+- **960×300** pixel-art stage (Three.js canvas, crisp scaling)
+- **Controllers:** `LAYA` (remote inference), `RULES` (ideal action per obstacle), `RANDOM`
+- **Live decision card** under the canvas: question, answer, controller, deadline bar, Laya timings when available
+- **Decision terminal:** full request/response history per obstacle
 
-### 1. Clone and Install
+## Quick start
 
 ```bash
-git clone <your-repo-url>
-cd your-project-name
 pnpm install
-```
-
-### 2. Environment Setup
-
-Copy the example environment file and fill in your values:
-
-```bash
-cp .env.example .env.local
-```
-
-Required environment variables:
-- `DATABASE_URL` - PostgreSQL connection string
-- `BETTER_AUTH_SECRET` - 32+ character secret key
-- `RESEND_API_KEY` - For email functionality
-- `GOOGLE_CLIENT_ID` & `GOOGLE_CLIENT_SECRET` - For Google OAuth
-- `UPLOADTHING_TOKEN` - For file uploads
-
-### 3. Database Setup
-
-```bash
-# Generate and run migrations
-pnpm db:generate
-pnpm db:migrate
-
-# Or push schema directly (development)
-pnpm db:push
-
-# Open Drizzle Studio to inspect your database
-pnpm db:studio
-```
-
-### 4. Start Development
-
-```bash
+cp .env.example .env
 pnpm dev
 ```
 
-Visit [http://localhost:3000](http://localhost:3000) to see your app.
+Open [http://localhost:3000](http://localhost:3000). Choose a controller and tier, then **Start**.
 
-## 📚 Available Scripts
+### Environment (game)
 
-### Development
-- `pnpm dev` - Start development server
-- `pnpm build` - Build for production
-- `pnpm start` - Start production server
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `LAYA_BASE_URL` | For LAYA | SystemOne base URL (see `.env.example`; `/v1/systemone` is appended if missing) |
+| `LAYA_API_KEY` | For LAYA | Bearer token for Laya |
+| `NEXT_PUBLIC_APP_NAME` | Optional | UI title (default `DINO.AI`) |
+| `NEXT_PUBLIC_APP_URL` | Optional | App URL for metadata |
 
-### Code Quality
-- `pnpm lint` - Run Biome linter with auto-fix
-- `pnpm format` - Format code with Biome
-- `pnpm check` - Run all Biome checks
-- `pnpm spell` - Check spelling in source files
+For **RULES** or **RANDOM**, Laya credentials are not required.
 
-### Database
-- `pnpm db:generate` - Generate migrations from schema
-- `pnpm db:migrate` - Apply migrations to database
-- `pnpm db:push` - Push schema changes directly
-- `pnpm db:studio` - Open Drizzle Studio
+## How decisions work
 
-## 🏗️ Project Structure
+When an obstacle enters the sensor range, the engine sends one structured payload (state + choice question) to `/api/decide`. For **LAYA**, the route forwards to SystemOne and returns `choice`, probabilities, and optional `X-Inference-Time-Ms`.
+
+**State** includes player pose (text), upcoming obstacle label, distance, speed, time-to-collision, and the next obstacle label.
+
+**Acceptable actions by obstacle:**
+
+| Obstacle | Valid moves |
+|----------|-------------|
+| Cacti (short / tall / cluster) | `JUMP` |
+| Low-flying bird | `JUMP` or `DUCK` |
+| High-flying bird | `RUN` |
+
+The engine scores **on time** only if the reply arrives before a maneuver-specific deadline (jump lead uses clearance height including `yOffset`, so jumping over a low bird is timed correctly). Late or wrong moves may still execute and can cause a crash.
+
+## Scripts
+
+| Command | Purpose |
+|---------|---------|
+| `pnpm dev` | Development server |
+| `pnpm build` / `pnpm start` | Production build and serve |
+| `pnpm sim:rules` | Headless RULES tests (bird duck, RUN crash, 40-obstacle run) |
+| `pnpm bench:laya` | Batch latency bench against `/api/decide` (set `LAYA_BENCH_URL` if needed) |
+| `pnpm sprites:cactus` / `sprites:birds` / `sprites:scenery` | Regenerate sprite assets from source sheets |
+| `pnpm lint` / `pnpm check` | Biome lint and format |
+
+## Project layout (game)
 
 ```
 src/
-├── app/                    # Next.js app directory
-│   ├── (auth)/            # Auth-related pages
-│   ├── globals.css        # Global styles
-│   ├── layout.tsx         # Root layout
-│   └── providers.tsx      # App providers
-├── components/            # Reusable components
-│   ├── auth/             # Auth-specific components
-│   └── ui/               # shadcn/ui components
-├── db/                   # Database configuration
-│   ├── migrations/       # Database migrations
-│   ├── schema/          # Database schema
-│   └── index.ts         # Database connection
-└── lib/                 # Utility functions
-    ├── auth.ts          # Better Auth configuration
-    ├── auth-client.ts   # Client-side auth utilities
-    ├── config.ts        # App configuration
-    ├── email.ts         # Email utilities
-    ├── env.ts           # Environment validation
-    ├── rate-limit.ts    # Rate limiting utilities
-    └── utils.ts         # General utilities
+├── app/
+│   ├── page.tsx              # DINO.AI homepage
+│   └── api/decide/route.ts   # LAYA / RULES / RANDOM decision proxy
+├── components/dino/          # Stage UI, canvas, performance panel, decision log
+└── lib/game/
+    ├── engine.ts             # Simulation, deadlines, collisions
+    ├── physics.ts            # Jump arc, hitboxes, maneuver lead times
+    ├── obstacles.ts          # Spawn definitions and labels
+    ├── controllers.ts        # Laya request builder
+    └── laya/client.ts        # SystemOne HTTP client
+public/sprites/               # Atlases, cactus variants, birds, scenery
+scripts/                      # sim-rules, bench-laya, asset pipelines
 ```
 
-## 🔐 Authentication
+## Rendering and smoothness
 
-This template uses [Better Auth](https://better-auth.com) with the following features:
+The simulation steps on `requestAnimationFrame`. The canvas reads a **per-frame snapshot** ref; React store updates (distance in HUD panels, stats) are throttled (~250ms) to avoid unnecessary re-renders.
 
-- **Email/Password** authentication with verification
-- **Google OAuth** integration
-- **Password reset** functionality
-- **Account deletion** with admin protection
-- **Session management** with cookie caching
-- **Rate limiting** on auth endpoints
+## Template features (optional)
 
-## 🗄️ Database
+The repo still includes Better Auth, Drizzle, todos, and related routes. To use them, uncomment and set variables in `.env.example` (`DATABASE_URL`, `BETTER_AUTH_SECRET`, etc.) and run `pnpm db:push`. See [CLAUDE.md](CLAUDE.md) for full template conventions.
 
-- **Drizzle ORM** with PostgreSQL
-- **Type-safe** database queries
-- **Automatic migrations** generation
-- **Snake case** column naming
-- **Connection pooling** configured
+## License
 
-## 🎨 UI Components
-
-- **Tailwind CSS** for styling
-- **shadcn/ui** component library
-- **Radix UI** primitives
-- **Dark/Light theme** toggle
-- **Responsive design** patterns
-
-## 🔒 Security Features
-
-- **Content Security Policy** headers
-- **Rate limiting** on API routes
-- **Environment variable** validation
-- **SQL injection** protection with Drizzle
-- **XSS protection** with proper escaping
-
-## 📦 Deployment
-
-### Vercel (Recommended)
-
-1. Push your code to GitHub
-2. Connect your repository to Vercel
-3. Add environment variables in Vercel dashboard
-4. Deploy automatically
-
-### Other Platforms
-
-This template works with any platform that supports Node.js:
-- Railway
-- Render
-- DigitalOcean App Platform
-- AWS Amplify
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create your feature branch
-3. Make your changes
-4. Run `pnpm check` to ensure code quality
-5. Commit using conventional commits
-6. Push to your fork and create a pull request
-
-## 📝 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🆘 Support
-
-- Check the [CLAUDE.md](CLAUDE.md) file for development guidance
-- Open an issue for bugs or feature requests
-- Refer to the official documentation of used technologies
-
-## 🔗 Links
-
-- [Next.js Documentation](https://nextjs.org/docs)
-- [Better Auth Documentation](https://better-auth.com)
-- [Drizzle ORM Documentation](https://orm.drizzle.team)
-- [Biome Documentation](https://biomejs.dev)
-- [Tailwind CSS Documentation](https://tailwindcss.com)
-- [shadcn/ui Documentation](https://ui.shadcn.com)
+MIT — see [LICENSE](LICENSE).
